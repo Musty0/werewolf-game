@@ -1,0 +1,552 @@
+/* ============================================================
+   WEREWOLF — The Town Notice Board
+   A Salem-1692 night: notices nailed up by moonlight, a
+   wax-sealed declaration of who you really are, and a verdict
+   stamped in dried blood when the hunt is over.
+
+   LAYOUT CONTRACT: the page itself never scrolls. Every screen
+   is a fixed-height column (header / scrollable body / footer).
+   Secondary content (settings, full role text, the log, the
+   full roster) lives in modals, which may scroll internally.
+   ============================================================ */
+
+:root {
+  /* moonlit slate wall + frame (cool, not muddy-brown) */
+  --wall: #23252b;
+  --wall-lift: #383b46;
+  --frame: #16171a;
+  --frame-grain: #0c0d0f;
+
+  /* parchment */
+  --paper: #e6ddc4;
+  --ledger: #d6c89a;
+  --ledger-dark: #a8925c;
+
+  /* ink */
+  --ink: #241d15;
+  --ink-soft: #4a4030;
+
+  /* moonlit / blood-ink accents */
+  --bone: #e6e2d6;
+  --moonlight: #93a6c4;
+  --moonlight-deep: #28425c;
+  --blood: #6b2420;
+  --blood-bright: #c2493c;
+  --moss: #2f4a28;
+  --twilight: #4a3a5c;
+  --iron-light: #8b8478;
+  --iron-dark: #44403a;
+
+  --shadow-pin: 0 10px 16px -6px rgba(10, 6, 2, 0.6);
+  --shadow-modal: 0 30px 70px rgba(0, 0, 0, 0.65);
+
+  --font-title: "UnifrakturCook", cursive;
+  --font-stamp: "IM Fell English SC", serif;
+  --font-body: "IM Fell English", serif;
+  --font-hand: "Caveat", cursive;
+
+  --wall-noise: url("data:image/svg+xml,%3Csvg%20xmlns='http%3A//www.w3.org/2000/svg'%20width='160'%20height='160'%3E%3Cfilter%20id='n'%3E%3CfeTurbulence%20type='fractalNoise'%20baseFrequency='0.85'%20numOctaves='3'%20stitchTiles='stitch'%20result='t'/%3E%3CfeColorMatrix%20in='t'%20type='saturate'%20values='0'/%3E%3C/filter%3E%3Crect%20width='100%25'%20height='100%25'%20filter='url%28%23n%29'/%3E%3C/svg%3E");
+  --paper-noise: url("data:image/svg+xml,%3Csvg%20xmlns='http%3A//www.w3.org/2000/svg'%20width='140'%20height='140'%3E%3Cfilter%20id='n'%3E%3CfeTurbulence%20type='fractalNoise'%20baseFrequency='0.65'%20numOctaves='2'%20stitchTiles='stitch'%20result='t'/%3E%3CfeColorMatrix%20in='t'%20type='saturate'%20values='0'/%3E%3C/filter%3E%3Crect%20width='100%25'%20height='100%25'%20filter='url%28%23n%29'/%3E%3C/svg%3E");
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+html {
+  height: 100%;
+  /* prevent iOS Safari bounce-scroll from ever revealing blank space */
+  overscroll-behavior: none;
+}
+body {
+  margin: 0;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  font-family: var(--font-body);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  background-color: var(--wall);
+  background-image:
+    var(--wall-noise),
+    radial-gradient(circle at 50% 38%, var(--wall-lift), transparent 60%),
+    radial-gradient(circle at 50% 105%, rgba(0, 0, 0, 0.55), transparent 65%);
+  background-blend-mode: overlay, normal, normal;
+  background-size: 160px 160px, auto, auto;
+}
+
+h1, h2, h3 { font-family: var(--font-stamp); font-weight: 400; margin: 0 0 0.25em; color: var(--ink); letter-spacing: 0.02em; }
+p { margin: 0 0 0.6em; color: var(--ink-soft); line-height: 1.5; font-size: 1rem; }
+a { color: var(--moonlight-deep); }
+
+button {
+  font-family: var(--font-stamp);
+  cursor: pointer;
+  border-radius: 2px;
+  letter-spacing: 0.05em;
+  font-size: 0.92rem;
+  padding: 0.85em 1.2em;
+  border: none;
+  transition: background 0.12s ease, color 0.12s ease, transform 0.08s ease;
+}
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible {
+  outline: 2px solid var(--moonlight);
+  outline-offset: 3px;
+}
+button:active { transform: scale(0.98); }
+button:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+.btn-primary {
+  background: var(--paper);
+  color: var(--moss);
+  border: 2.5px solid var(--moss);
+  box-shadow: 0 0 0 1px rgba(47, 74, 40, 0.2) inset;
+}
+.btn-primary:hover:not(:disabled) { background: #ddd2ad; }
+.btn-primary:active:not(:disabled) { background: var(--moss); color: var(--paper); }
+
+.btn-ghost { background: transparent; color: var(--bone); border: 2px solid var(--iron-light); }
+.btn-ghost:hover { background: rgba(255, 255, 255, 0.06); }
+.screen-body .btn-ghost, .modal-box .btn-ghost { color: var(--ink); border-color: var(--ink-soft); }
+.screen-body .btn-ghost:hover, .modal-box .btn-ghost:hover { background: rgba(0, 0, 0, 0.05); }
+
+.btn-danger { background: var(--paper); color: var(--blood); border: 2.5px solid var(--blood); }
+.btn-danger:active:not(:disabled) { background: var(--blood); color: var(--paper); }
+
+.btn-block { width: 100%; }
+.btn-sm { padding: 0.5em 0.9em; font-size: 0.76rem; }
+
+input[type="text"], select {
+  font-family: var(--font-body);
+  background: rgba(255, 255, 255, 0.35);
+  border: none;
+  border-bottom: 2px solid var(--ink-soft);
+  border-radius: 0;
+  color: var(--ink);
+  padding: 0.7em 0.3em;
+  font-size: 1.1rem;
+  width: 100%;
+}
+input[type="text"]::placeholder { color: rgba(74, 64, 48, 0.5); }
+input[type="text"]:focus, select:focus { background: rgba(255, 255, 255, 0.55); }
+
+/* ================================================ app shell / screens */
+.app-shell {
+  max-width: 560px;
+  margin: 0 auto;
+  height: 100vh;
+  height: 100dvh;
+  padding: min(3vh, 18px) 14px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.app-shell::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image: url("../img/moon.png");
+  background-repeat: no-repeat;
+  background-position: right 10px top 1.5vh;
+  background-size: min(140px, 30vw);
+  opacity: 0.6;
+}
+.app-shell::after {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image: url("../img/treeline.png");
+  background-repeat: no-repeat;
+  background-position: center bottom -8px;
+  background-size: 100% min(160px, 22vh);
+  opacity: 0.6;
+}
+.hidden { display: none !important; }
+
+.screen {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  position: relative;
+  z-index: 1;
+}
+.screen-header { flex: 0 0 auto; }
+.screen-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+#screen-landing .screen-body { display: flex; flex-direction: column; }
+.landing-stack { width: 100%; margin-top: 6px; }
+
+.header-icon-row { display: flex; gap: 8px; justify-content: center; margin-top: 8px; }
+
+.divider-or {
+  text-align: center;
+  color: var(--bone);
+  font-family: var(--font-hand);
+  font-size: 1.05rem;
+  margin: 4px 0;
+  position: relative;
+}
+.divider-or::before, .divider-or::after {
+  content: "";
+  position: absolute; top: 50%; width: 36%;
+  border-top: 2px dashed var(--iron-light);
+  opacity: 0.5;
+}
+.divider-or::before { left: 0; }
+.divider-or::after { right: 0; }
+.screen-footer { flex: 0 0 auto; }
+
+/* ---------------------------------------------------------- brand */
+.brand { text-align: center; }
+.brand .eyebrow {
+  font-family: var(--font-hand);
+  font-size: 1rem;
+  color: var(--bone);
+  display: block;
+  margin-bottom: 0;
+}
+.brand h1 {
+  font-family: var(--font-title);
+  font-weight: 700;
+  font-size: clamp(2rem, 9vh, 3rem);
+  color: var(--bone);
+  letter-spacing: 0.02em;
+  margin: 0;
+  text-shadow: 0 0 16px rgba(194, 73, 58, 0.4), 2px 2px 0 rgba(0, 0, 0, 0.4);
+}
+.brand h1.title-sm { font-size: clamp(1.5rem, 5vh, 2rem); }
+
+/* -------------------------------------------------- pinned cards */
+.card {
+  position: relative;
+  background-color: var(--paper);
+  background-image: var(--paper-noise);
+  background-blend-mode: multiply;
+  background-size: 140px 140px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 2px;
+  padding: 22px 18px 16px;
+  margin: 12px 4px;
+  box-shadow: var(--shadow-pin);
+}
+.card::before {
+  content: "";
+  position: absolute;
+  top: -7px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, var(--iron-light), var(--iron-dark) 75%);
+  box-shadow: 0 3px 4px rgba(0, 0, 0, 0.55);
+  z-index: 2;
+}
+
+.card-label {
+  font-family: var(--font-stamp);
+  font-size: 0.78rem;
+  letter-spacing: 0.1em;
+  color: var(--blood);
+  display: inline-block;
+  padding: 2px 10px;
+  border: 1.5px solid var(--blood);
+  border-radius: 2px;
+  margin-bottom: 12px;
+}
+
+.field { margin-bottom: 14px; }
+.field label { display: block; font-family: var(--font-hand); font-size: 1.02rem; color: var(--ink-soft); margin-bottom: 2px; }
+
+/* ---------------------------------------------------- lobby code */
+.lobby-code-display {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  margin-top: 4px;
+}
+.lobby-code-display .code {
+  font-family: var(--font-stamp);
+  font-size: 1.3rem;
+  letter-spacing: 0.18em;
+  color: var(--bone);
+  border: 1px dashed var(--iron-light);
+  padding: 4px 12px;
+  border-radius: 2px;
+}
+#join-code-input { font-family: var(--font-stamp); letter-spacing: 0.18em; text-align: center; font-size: 1.2rem; }
+
+/* ----------------------------------------- town clock (signature) */
+.town-clock-wrap { display: flex; justify-content: center; }
+.town-clock {
+  --pct: 0;
+  --phase-ink: var(--ink-soft);
+  width: min(150px, 28vh);
+  height: min(150px, 28vh);
+  border-radius: 50%;
+  position: relative;
+  display: flex; align-items: center; justify-content: center;
+  background:
+    radial-gradient(circle at 50% 50%, var(--paper) 0%, var(--paper) 63%, transparent 64%),
+    conic-gradient(var(--phase-ink) calc(var(--pct) * 1%), rgba(0, 0, 0, 0.1) 0);
+  border: 3px solid var(--ink);
+  box-shadow: 0 0 0 3px var(--paper), var(--shadow-pin);
+  transition: background 0.6s linear;
+  flex-shrink: 0;
+}
+.town-clock::after {
+  content: "";
+  position: absolute; inset: 12px;
+  border-radius: 50%;
+  border: 1.5px dashed rgba(36, 29, 21, 0.32);
+}
+.town-clock.is-night { --phase-ink: var(--moonlight-deep); }
+.town-clock.is-day { --phase-ink: var(--blood); }
+.town-clock-inner { text-align: center; position: relative; z-index: 1; }
+.town-clock-phase { font-family: var(--font-stamp); font-size: 0.62rem; letter-spacing: 0.14em; color: var(--ink-soft); }
+.town-clock-time { font-family: var(--font-stamp); font-size: 1.5rem; color: var(--ink); margin: 0; line-height: 1.2; }
+.town-clock-round { font-family: var(--font-hand); font-size: 0.95rem; color: var(--bone); text-align: center; margin-top: 2px; }
+
+/* ------------------------------------------------- role chip + icon row */
+.game-header-row { display: flex; align-items: center; gap: 8px; justify-content: center; margin-top: 8px; flex-wrap: wrap; }
+.role-chip {
+  display: flex; align-items: center; gap: 6px;
+  background-color: var(--ledger);
+  background-image: var(--paper-noise); background-blend-mode: multiply;
+  border: 1px solid var(--ledger-dark);
+  border-radius: 999px;
+  padding: 6px 14px 6px 8px;
+  color: var(--ink);
+  font-family: var(--font-stamp);
+  font-size: 0.85rem;
+}
+.role-chip .chip-icon { font-size: 1.2rem; }
+.icon-btn {
+  width: 38px; height: 38px; border-radius: 50%;
+  background: var(--paper); color: var(--ink);
+  border: 1px solid var(--iron-light);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.1rem; padding: 0; position: relative;
+}
+.icon-btn .dot {
+  position: absolute; top: 2px; right: 2px; width: 9px; height: 9px;
+  border-radius: 50%; background: var(--blood-bright); border: 1.5px solid var(--wall);
+}
+
+/* ------------------------------------------------- suspect cards */
+.player-list { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; padding: 4px 0; }
+.player-chip {
+  position: relative;
+  width: 84px;
+  background-color: var(--paper);
+  background-image: var(--paper-noise);
+  background-blend-mode: multiply;
+  background-size: 120px 120px;
+  padding: 8px 6px 10px;
+  box-shadow: var(--shadow-pin);
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+}
+.player-chip::before {
+  content: "";
+  position: absolute; top: -6px; left: 50%; transform: translateX(-50%);
+  width: 10px; height: 10px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, var(--iron-light), var(--iron-dark) 75%);
+  box-shadow: 0 3px 4px rgba(0, 0, 0, 0.5);
+}
+.player-chip .avatar {
+  width: 48px; height: 48px;
+  background: repeating-linear-gradient(45deg, #cabe97, #cabe97 4px, #bdb086 4px, #bdb086 8px);
+  border: 1px solid rgba(0, 0, 0, 0.3);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-stamp); font-size: 1.15rem; color: var(--ink-soft);
+}
+.player-chip .name { font-family: var(--font-hand); font-size: 0.92rem; text-align: center; color: var(--ink); line-height: 1.1; }
+.player-chip .tag {
+  font-family: var(--font-stamp); font-size: 0.55rem; letter-spacing: 0.04em;
+  border: 1px solid var(--ink-soft); border-radius: 2px; padding: 0 5px; color: var(--ink-soft);
+}
+.player-chip.is-dead { opacity: 0.7; }
+.player-chip.is-dead .name { text-decoration: line-through; }
+.player-chip.is-dead::after {
+  content: "OUT";
+  position: absolute; top: 40%; left: 50%;
+  transform: translate(-50%, -50%) rotate(-16deg);
+  font-family: var(--font-stamp);
+  color: var(--blood);
+  border: 2px solid var(--blood);
+  padding: 1px 6px;
+  font-size: 0.6rem;
+  letter-spacing: 0.06em;
+  background: rgba(230, 221, 196, 0.8);
+}
+.player-chip.is-me { box-shadow: 0 0 0 2px var(--moonlight), var(--shadow-pin); }
+
+/* -------------------------------------------------- vote targets */
+.vote-target {
+  width: 100%; text-align: left; display: flex; align-items: center; gap: 10px;
+  background-color: var(--paper);
+  background-image: var(--paper-noise);
+  background-blend-mode: multiply;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 2px;
+  padding: 11px 14px; margin-bottom: 7px;
+  color: var(--ink); font-family: var(--font-body); font-size: 1rem;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+}
+.vote-target .count { margin-left: auto; }
+.vote-target.selected { border-color: var(--blood); background-color: #ded0aa; }
+.vote-target:disabled { opacity: 0.35; }
+
+.tally { display: inline-flex; align-items: center; gap: 7px; }
+.tally-group { position: relative; display: inline-flex; gap: 2.5px; padding-right: 1px; }
+.tally-stroke { width: 2.5px; height: 15px; background: var(--ink); }
+.tally-slash {
+  position: absolute; left: -3px; right: -3px; top: 6px; height: 2.5px;
+  background: var(--blood); transform: rotate(-30deg);
+}
+
+.empty-note {
+  text-align: center; font-family: var(--font-hand); font-size: 1.15rem;
+  color: var(--bone); padding: 20px 12px;
+}
+
+/* ----------------------------------------------- role detail (modal) */
+.role-detail { text-align: center; }
+.role-detail .role-icon { font-size: 2.6rem; display: block; margin-bottom: 2px; }
+.role-detail .role-name { font-family: var(--font-stamp); font-size: 1.4rem; }
+.role-team {
+  display: inline-block; font-family: var(--font-stamp); font-size: 0.65rem;
+  letter-spacing: 0.1em; padding: 2px 10px; border-radius: 2px;
+  margin-bottom: 8px; border: 1px solid currentColor;
+}
+.role-team.team-town { color: var(--moss); }
+.role-team.team-mafia { color: var(--blood); }
+.role-team.team-neutral { color: var(--twilight); }
+
+.mafia-team-list {
+  font-family: var(--font-hand); font-size: 1.05rem; color: var(--ink-soft);
+  border-top: 1px dashed rgba(0, 0, 0, 0.28); padding-top: 8px; margin-top: 8px;
+}
+.mafia-team-list strong { color: var(--blood); }
+
+/* ------------------------------------------------------- log feed */
+.log-feed { display: flex; flex-direction: column-reverse; gap: 7px; }
+.log-entry { font-size: 0.92rem; color: var(--ink-soft); border-left: 3px solid var(--ink-soft); padding: 3px 0 3px 10px; }
+.log-entry.is-death { border-color: var(--blood); color: var(--ink); }
+.log-entry.is-death::before { content: "\2715  "; color: var(--blood); }
+.log-entry.is-win { border-color: var(--moss); color: var(--moss); font-weight: bold; }
+.log-entry.is-win::before { content: "\2605  "; }
+
+/* ------------------------------------------------------------ misc */
+.muted-note { font-size: 0.86rem; color: var(--bone); font-family: var(--font-hand); font-size: 1rem; text-align: center; margin: 6px 0 0; }
+.modal-box .muted-note, .card .muted-note { color: var(--ink-soft); }
+.stepper { display: flex; align-items: center; gap: 12px; }
+.stepper button { width: 34px; height: 34px; padding: 0; border-radius: 50%; background: var(--paper); color: var(--ink); border: 2px solid var(--ink-soft); }
+.stepper .value { font-family: var(--font-stamp); font-size: 1.15rem; width: 24px; text-align: center; }
+.toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 9px 0; border-bottom: 1px dashed rgba(0, 0, 0, 0.25); }
+.toggle-row:last-of-type { border-bottom: none; }
+.toggle-row .role-mini { display: flex; align-items: center; gap: 8px; font-family: var(--font-body); font-weight: bold; }
+
+.switch { position: relative; width: 44px; height: 26px; flex-shrink: 0; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.switch .track { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: #b3a06a; border-radius: 999px; transition: background 0.2s; }
+.switch .track::before { content: ""; position: absolute; width: 20px; height: 20px; left: 3px; top: 3px; background: var(--paper); border-radius: 50%; transition: transform 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.35); }
+.switch input:checked + .track { background: var(--moss); }
+.switch input:checked + .track::before { transform: translateX(18px); }
+
+.footer-row { display: flex; gap: 8px; }
+.footer-row button { flex: 1; }
+
+.config-warning {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 300;
+  background: var(--blood); color: var(--paper);
+  font-family: var(--font-body); font-size: 0.82rem; line-height: 1.4;
+  text-align: center; padding: 8px 14px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+}
+.config-warning code {
+  background: rgba(0, 0, 0, 0.28); padding: 1px 5px; border-radius: 2px;
+  font-family: var(--font-stamp); font-size: 0.85em;
+}
+
+.toast {
+  position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+  background: var(--paper); border: 1.5px solid var(--ink-soft);
+  color: var(--ink); padding: 10px 16px; border-radius: 2px;
+  font-family: var(--font-hand); font-size: 1.05rem; box-shadow: var(--shadow-pin); z-index: 200;
+  opacity: 0; pointer-events: none; transition: opacity 0.25s ease, transform 0.25s ease;
+  max-width: 90vw;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(-4px); }
+.toast.is-error { border-color: var(--blood); color: var(--blood); }
+
+/* ------------------------------------------------------ end screen */
+.end-banner { text-align: center; flex: 0 0 auto; }
+.end-banner .winner-label {
+  font-family: var(--font-stamp);
+  font-size: clamp(1.5rem, 7vh, 2.2rem);
+  letter-spacing: 0.04em;
+  display: inline-block;
+  border: 3px solid currentColor;
+  padding: 6px 16px;
+  border-radius: 4px;
+  text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.15);
+  margin-bottom: 2px;
+}
+.end-banner .winner-label.team-town { color: var(--moss); }
+.end-banner .winner-label.team-mafia { color: var(--blood); }
+.end-banner .winner-label.team-neutral { color: var(--twilight); }
+
+.host-only-badge {
+  font-family: var(--font-stamp); font-size: 0.62rem; letter-spacing: 0.06em;
+  color: var(--blood); border: 1px solid var(--blood); border-radius: 2px; padding: 1px 6px;
+}
+
+/* ============================================================ modals */
+.modal-overlay {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(8, 6, 4, 0.72);
+  display: flex; align-items: center; justify-content: center;
+  padding: 18px; z-index: 100;
+}
+.modal-box {
+  position: relative;
+  background-color: var(--paper);
+  background-image: var(--paper-noise); background-blend-mode: multiply;
+  width: 100%; max-width: 440px;
+  max-height: 82dvh;
+  overflow-y: auto;
+  border-radius: 3px;
+  padding: 24px 18px 18px;
+  box-shadow: var(--shadow-modal);
+}
+.modal-close {
+  position: absolute; top: 8px; right: 8px;
+  width: 30px; height: 30px; border-radius: 50%;
+  background: var(--ink-soft); color: var(--paper);
+  font-size: 1.1rem; line-height: 1; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+
+.help-list { margin: 0; padding-left: 1.2em; color: var(--ink-soft); }
+.help-list li { margin-bottom: 0.7em; line-height: 1.5; }
+.help-list strong { color: var(--ink); }
+
+.roles-reference-item {
+  display: flex; gap: 10px; align-items: flex-start;
+  padding: 10px 0; border-bottom: 1px dashed rgba(0, 0, 0, 0.2);
+}
+.roles-reference-item:last-child { border-bottom: none; }
+.roles-reference-item .rr-icon { font-size: 1.6rem; flex-shrink: 0; line-height: 1.3; }
+.roles-reference-item .rr-name { font-family: var(--font-stamp); font-size: 1.05rem; color: var(--ink); }
+.roles-reference-item .rr-blurb { font-size: 0.92rem; color: var(--ink-soft); margin: 2px 0 0; }

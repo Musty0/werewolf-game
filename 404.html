@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Werewolf</title>
+<script>
+  // Turns /<base>/lobby/K7X92 into /<base>/?p=/lobby/K7X92 so that a
+  // direct visit (or page refresh) on a deep link doesn't hit GitHub
+  // Pages' real 404 page. index.html reverses this on load.
+  var path = location.pathname + location.search + location.hash;
+  var marker = '/lobby/';
+  var idx = path.indexOf(marker);
+  var basePath = idx === -1 ? path.replace(/[^/]*$/, '') : path.slice(0, idx);
+  var rest = idx === -1 ? '' : path.slice(idx);
+  location.replace(basePath + '/?p=' + encodeURIComponent(rest));
+</script>
+</head>
+<body>
+  <p>Redirecting&hellip; if nothing happens, <a href="./">go back to Werewolf</a>.</p>
+</body>
+</html>

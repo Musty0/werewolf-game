@@ -1,0 +1,80 @@
+{
+  "rules": {
+    "lobbies": {
+      "$code": {
+
+        "hostId": {
+          ".read": "auth != null",
+          ".write": "auth != null && (!data.exists() || auth.uid === data.val())"
+        },
+
+        "phase":        { ".read": "auth != null", ".write": "auth != null && auth.uid === root.child('lobbies/' + $code + '/hostId').val()" },
+        "round":        { ".read": "auth != null", ".write": "auth != null && auth.uid === root.child('lobbies/' + $code + '/hostId').val()" },
+        "phaseEndsAt":  { ".read": "auth != null", ".write": "auth != null && auth.uid === root.child('lobbies/' + $code + '/hostId').val()" },
+        "winner":       { ".read": "auth != null", ".write": "auth != null && auth.uid === root.child('lobbies/' + $code + '/hostId').val()" },
+        "createdAt":    { ".read": "auth != null", ".write": "auth != null && auth.uid === root.child('lobbies/' + $code + '/hostId').val()" },
+
+        "settings": {
+          ".read": "auth != null",
+          ".write": "auth != null && auth.uid === root.child('lobbies/' + $code + '/hostId').val()"
+        },
+
+        "players": {
+          ".read": "auth != null",
+          "$uid": {
+            ".write": "auth != null && (auth.uid === $uid || auth.uid === root.child('lobbies/' + $code + '/hostId').val())"
+          }
+        },
+
+        "log": {
+          ".read": "auth != null",
+          "$entry": { ".write": "auth != null" }
+        },
+
+        "votes": {
+          ".read": "auth != null",
+          ".write": "auth != null && auth.uid === root.child('lobbies/' + $code + '/hostId').val()",
+          "$round": {
+            "$uid": { ".write": "auth != null && auth.uid === $uid" }
+          }
+        },
+
+        "nightActions": {
+          ".write": "auth != null && auth.uid === root.child('lobbies/' + $code + '/hostId').val()",
+          "$round": {
+            "$roleKey": {
+              ".read": "auth != null && auth.uid === root.child('lobbies/' + $code + '/hostId').val()",
+              "$uid": { ".write": "auth != null && auth.uid === $uid" }
+            }
+          }
+        },
+
+        "mafiaTeam": {
+          ".read": "auth != null && (root.child('lobbies/' + $code + '/mafiaTeam/' + auth.uid).exists() || auth.uid === root.child('lobbies/' + $code + '/hostId').val())",
+          ".write": "auth != null && auth.uid === root.child('lobbies/' + $code + '/hostId').val()"
+        },
+
+        "secretRoles": {
+          ".write": "auth != null && auth.uid === root.child('lobbies/' + $code + '/hostId').val()",
+          "$uid": {
+            ".read": "auth != null && (auth.uid === $uid || auth.uid === root.child('lobbies/' + $code + '/hostId').val())",
+            ".write": "auth != null && auth.uid === root.child('lobbies/' + $code + '/hostId').val()"
+          }
+        },
+
+        "private": {
+          ".write": "auth != null && auth.uid === root.child('lobbies/' + $code + '/hostId').val()",
+          "$uid": {
+            ".read": "auth != null && (auth.uid === $uid || auth.uid === root.child('lobbies/' + $code + '/hostId').val())",
+            ".write": "auth != null && auth.uid === root.child('lobbies/' + $code + '/hostId').val()"
+          }
+        },
+
+        "publicReveal": {
+          ".read": "auth != null",
+          ".write": "auth != null && auth.uid === root.child('lobbies/' + $code + '/hostId').val()"
+        }
+      }
+    }
+  }
+}
