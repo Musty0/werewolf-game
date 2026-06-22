@@ -2,17 +2,31 @@
   "rules": {
     "lobbies": {
       "$code": {
-
         "hostId": {
           ".read": "auth != null",
           ".write": "auth != null && (!data.exists() || auth.uid === data.val())"
         },
 
-        "phase":        { ".read": "auth != null", ".write": "auth != null && auth.uid === root.child('lobbies/' + $code + '/hostId').val()" },
-        "round":        { ".read": "auth != null", ".write": "auth != null && auth.uid === root.child('lobbies/' + $code + '/hostId').val()" },
-        "phaseEndsAt":  { ".read": "auth != null", ".write": "auth != null && auth.uid === root.child('lobbies/' + $code + '/hostId').val()" },
-        "winner":       { ".read": "auth != null", ".write": "auth != null && auth.uid === root.child('lobbies/' + $code + '/hostId').val()" },
-        "createdAt":    { ".read": "auth != null", ".write": "auth != null && auth.uid === root.child('lobbies/' + $code + '/hostId').val()" },
+        "phase": {
+          ".read": "auth != null",
+          ".write": "auth != null && auth.uid === root.child('lobbies/' + $code + '/hostId').val()"
+        },
+        "round": {
+          ".read": "auth != null",
+          ".write": "auth != null && auth.uid === root.child('lobbies/' + $code + '/hostId').val()"
+        },
+        "phaseEndsAt": {
+          ".read": "auth != null",
+          ".write": "auth != null && auth.uid === root.child('lobbies/' + $code + '/hostId').val()"
+        },
+        "winner": {
+          ".read": "auth != null",
+          ".write": "auth != null && auth.uid === root.child('lobbies/' + $code + '/hostId').val()"
+        },
+        "createdAt": {
+          ".read": "auth != null",
+          ".write": "auth != null && auth.uid === root.child('lobbies/' + $code + '/hostId').val()"
+        },
 
         "settings": {
           ".read": "auth != null",
