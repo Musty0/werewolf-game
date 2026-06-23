@@ -430,14 +430,14 @@ input[type="text"]:focus, select:focus { background: rgba(255, 255, 255, 0.55); 
   margin-bottom: 8px; border: 1px solid currentColor;
 }
 .role-team.team-town { color: var(--moss); }
-.role-team.team-mafia { color: var(--blood); }
+.role-team.team-werewolf { color: var(--blood); }
 .role-team.team-neutral { color: var(--twilight); }
 
-.mafia-team-list {
+.werewolf-team-list {
   font-family: var(--font-hand); font-size: 1.05rem; color: var(--ink-soft);
   border-top: 1px dashed rgba(0, 0, 0, 0.28); padding-top: 8px; margin-top: 8px;
 }
-.mafia-team-list strong { color: var(--blood); }
+.werewolf-team-list strong { color: var(--blood); }
 
 /* ------------------------------------------------------- log feed */
 .log-feed { display: flex; flex-direction: column-reverse; gap: 7px; }
@@ -504,13 +504,43 @@ input[type="text"]:focus, select:focus { background: rgba(255, 255, 255, 0.55); 
   margin-bottom: 2px;
 }
 .end-banner .winner-label.team-town { color: var(--moss); }
-.end-banner .winner-label.team-mafia { color: var(--blood); }
+.end-banner .winner-label.team-werewolf { color: var(--blood); }
 .end-banner .winner-label.team-neutral { color: var(--twilight); }
 
 .host-only-badge {
   font-family: var(--font-stamp); font-size: 0.62rem; letter-spacing: 0.06em;
   color: var(--blood); border: 1px solid var(--blood); border-radius: 2px; padding: 1px 6px;
 }
+
+/* ── Spectator badge ── */
+.spectator-badge {
+  text-align: center;
+  font-family: var(--font-hand);
+  font-size: 1rem;
+  color: var(--moonlight);
+  background: rgba(143, 163, 189, 0.12);
+  border: 1px dashed var(--moonlight);
+  border-radius: 2px;
+  padding: 4px 12px;
+  margin: 4px 0 0;
+}
+
+/* ── Revote note ── */
+.revote-note-text {
+  font-family: var(--font-hand);
+  font-size: 0.95rem;
+  color: var(--blood);
+  margin-bottom: 8px;
+}
+
+/* ── Reveal-choice prompt ── */
+.reveal-choice-card p { margin-bottom: 12px; }
+
+/* ── Werewolf team win colour (end screen) ── */
+.end-banner .winner-label.team-werewolf { color: var(--blood); }
+
+/* ── Pause/resume icon buttons (already styled as .icon-btn, just need gap) ── */
+#pause-btn, #resume-btn { border-color: var(--moonlight); }
 
 /* ============================================================ modals */
 .modal-overlay {
