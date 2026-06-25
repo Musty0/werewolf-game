@@ -243,12 +243,30 @@ function attachListeners(code) {
   const on = (path, fn) => onValue(ref(db, path), s => { fn(s.val()); render(); });
   on(`lobbies/${code}/hostId`,         v => { state.hostId = v; isHost = v === uid; });
   on(`lobbies/${code}/phase`,          v => { state.phase = v || 'lobby'; });
-  on(`lobbies/${code}/round`,          v => { state.round = v || 0; });
+  on(`lobbies/${code}/round`, v => {
+    const newRound = v || 0;
+    if (newRound !== state.round) seerPicks = []; // clear stale picks on round change
+    state.round = newRound;
+  });
   on(`lobbies/${code}/phaseEndsAt`,    v => { state.phaseEndsAt = v; });
   on(`lobbies/${code}/paused`,         v => { state.paused = !!v; });
+  on(`lobbies/${code}/pausedSecsLeft`, v => {
+    if (v != null) pausedTimeRemaining = v;
+  });
   on(`lobbies/${code}/winner`,         v => { state.winner = v; });
   on(`lobbies/${code}/settings`,       v => { state.settings = v || defaultSettings(); });
-  on(`lobbies/${code}/players`,        v => { state.players = v || {}; });
+  on(`lobbies/${code}/players`,        v => {
+    const prev = state.players;
+    state.players = v || {};
+    // Detect being kicked: our entry existed before and is now gone
+    if (prev[uid] && !state.players[uid] && state.phase === 'lobby') {
+      toast('You have been removed from the lobby.', true);
+      history.replaceState(null, '', getBasePath() + '/');
+      lobbyCode = null;
+      showScreen('landing');
+      return;
+    }
+  });
   on(`lobbies/${code}/log`,            v => { state.log = v || {}; });
   on(`lobbies/${code}/votes`,          v => { state.votes = v || {}; });
   on(`lobbies/${code}/revoteEligible`, v => { state.revoteEligible = v; });
@@ -345,22 +363,25 @@ OPTIONAL_ROLE_KEYS.forEach(key => {
 });
 
 // ── WAITING ROOM render ───────────────────────────────────────────────
-function playerChipHTML(pid, p, showRole = false) {
+function playerChipHTML(pid, p, showRole = false, allowKick = false) {
   const initial   = (p.name || '?').slice(0, 1).toUpperCase();
   const meClass   = pid === uid ? ' is-me' : '';
   const deadClass = p.alive === false ? ' is-dead' : '';
   let tag = '';
   if (p.isHost) tag = '<span class="tag">Host</span>';
   else if (p.revealed && p.revealedRoleName) tag = `<span class="tag">${escapeHTML(p.revealedRoleName)}</span>`;
-  // Spectators and end-screen see everyone's role
   if (showRole && state.publicReveal && state.publicReveal[pid]) {
     const def = ROLE_DEFS[state.publicReveal[pid]];
     if (def) tag = `<span class="tag">${def.icon} ${escapeHTML(def.name)}</span>`;
   }
+  const kickBtn = (allowKick && isHost && pid !== uid && !p.isHost)
+    ? `<button class="kick-btn btn-danger btn-sm" data-pid="${pid}" type="button" aria-label="Kick ${escapeHTML(p.name)}">✕</button>`
+    : '';
   return `<div class="player-chip${meClass}${deadClass}">
     <div class="avatar">${initial}</div>
     <div class="name">${escapeHTML(p.name || 'Player')}</div>
     ${tag}
+    ${kickBtn}
   </div>`;
 }
 
@@ -369,7 +390,19 @@ function renderWaitingRoom() {
   $('waiting-code').textContent = lobbyCode;
   const list = Object.entries(state.players);
   $('player-count').textContent = list.length;
-  $('waiting-player-list').innerHTML = list.map(([pid, p]) => playerChipHTML(pid, p)).join('');
+  $('waiting-player-list').innerHTML = list.map(([pid, p]) => playerChipHTML(pid, p, false, true)).join('');
+
+  // Wire up kick buttons (host only; generated dynamically)
+  $('waiting-player-list').querySelectorAll('.kick-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const pidToKick = btn.dataset.pid;
+      const playerName = state.players[pidToKick]?.name || 'that player';
+      if (!confirm(`Remove ${playerName} from the lobby?`)) return;
+      try {
+        await remove(ref(db, `lobbies/${lobbyCode}/players/${pidToKick}`));
+      } catch (e) { console.error(e); toast('Could not remove that player', true); }
+    });
+  });
 
   $('host-footer-row').classList.toggle('hidden', !isHost);
   $('start-game-hint').classList.toggle('hidden', !isHost);
@@ -409,7 +442,7 @@ $('start-game-btn').addEventListener('click', async () => {
   });
 
   const werewolfTeamObj = {};
-  werewolfUids.forEach(pid => { werewolfTeamObj[pid] = true; });
+  werewolfUids.forEach(pid => { werewolfTeamObj[pid] = roleByUid[pid]; }); // store role, not just true
   updates[`lobbies/${lobbyCode}/werewolfTeam`]  = werewolfTeamObj;
   updates[`lobbies/${lobbyCode}/phase`]         = 'night';
   updates[`lobbies/${lobbyCode}/round`]         = 1;
@@ -519,16 +552,16 @@ function renderRoleCard() {
   // Werewolf team: show teammates
   const wolfList = $('werewolf-team-list');
   if (werewolfTeamKeys().includes(role) && state.werewolfTeam) {
-    const teammates = Object.keys(state.werewolfTeam)
-      .filter(pid => pid !== uid)
-      .map(pid => {
-        const pRole = state.myRole === 'mageWerewolf' || pid !== uid
-          ? (state.players[pid]?.name || '?') : null;
-        return pRole;
-      }).filter(Boolean);
+    const teammates = Object.entries(state.werewolfTeam)
+      .filter(([pid]) => pid !== uid)
+      .map(([pid, teamRole]) => {
+        const name = escapeHTML(state.players[pid]?.name || '?');
+        // Spec: "Werewolves know Mage Werewolf" — label them
+        return teamRole === 'mageWerewolf' ? `${name} <span class="tag">Mage</span>` : name;
+      });
     wolfList.classList.toggle('hidden', !teammates.length);
     wolfList.innerHTML = teammates.length
-      ? `Your pack: <strong>${teammates.map(escapeHTML).join(', ')}</strong>`
+      ? `Your pack: <strong>${teammates.join(', ')}</strong>`
       : '';
   } else {
     wolfList.classList.add('hidden');
@@ -584,11 +617,17 @@ function renderNightAction() {
 
   if (!def || !def.night || !alive) return;
 
-  // Has this player already used their once-per-game ability?
-  const submitted = state.myPrivate && state.myPrivate[`submitted_r${state.round}`];
-  if (submitted && def.usesPerGame === 1) {
-    // Already used — show nothing
-    return;
+  // Once-per-game gate: check permanent abilityUsed flag, not the per-round submitted_r
+  const abilityUsed = state.myPrivate && state.myPrivate.abilityUsed;
+  if (abilityUsed && def.usesPerGame === 1) return;
+
+  // Pirate: duel only available after prep day
+  if (role === 'pirate') {
+    if (state.myPrivate && state.myPrivate.pirateUsed) return; // already duelled
+    if (!(state.piratePrepping && state.piratePrepping[uid])) {
+      // Has not prepped — no night action shown
+      return;
+    }
   }
 
   // Is this player silenced this round?
@@ -680,8 +719,20 @@ function renderNightAction() {
       <button class="vote-target" id="veteran-alert-btn" type="button">
         🪖 Go on Alert — anyone who visits you tonight dies
       </button>`;
-    $('veteran-alert-btn').addEventListener('click', () => submitNightAction(role, uid));
-    $('night-action-status').textContent = 'Warning: this includes the Doctor and Tracker.';
+    $('veteran-alert-btn').addEventListener('click', async () => {
+      try {
+        await set(ref(db, `lobbies/${lobbyCode}/nightActions/${state.round}/veteran/${uid}`), uid);
+        await update(ref(db, `lobbies/${lobbyCode}/private/${uid}`), {
+          [`submitted_r${state.round}`]: true,
+          abilityUsed: true
+        });
+        renderNightAction();
+      } catch (e) { console.error(e); toast('Could not submit — try again', true); }
+    });
+    const alreadyAlerted = state.myPrivate && state.myPrivate.abilityUsed;
+    $('night-action-status').textContent = alreadyAlerted
+      ? 'You are on Alert — anyone who visits you tonight dies.'
+      : 'Warning: this includes the Doctor and Tracker.';
   } else {
     // Standard single-target
     $('night-action-targets').innerHTML = candidates.map(([pid, p]) => {
@@ -715,9 +766,9 @@ async function submitSeerPicks() {
     const picksObj = {};
     seerPicks.forEach(pid => { picksObj[pid] = true; });
     await set(ref(db, `lobbies/${lobbyCode}/nightActions/${round}/inspect4/${uid}`), picksObj);
-    // Record locally that we've submitted
     await update(ref(db, `lobbies/${lobbyCode}/private/${uid}`), {
-      [`submitted_r${round}`]: true
+      [`submitted_r${round}`]: true,
+      abilityUsed: true
     });
     $('night-action-status').textContent = 'Selection confirmed — waiting for night to end.';
     $('seer-confirm-btn').classList.add('hidden');
@@ -726,12 +777,12 @@ async function submitSeerPicks() {
 
 async function submitNightAction(role, targetPid) {
   const round = state.round;
+  const def   = ROLE_DEFS[role];
   try {
     await set(ref(db, `lobbies/${lobbyCode}/nightActions/${round}/${role}/${uid}`), targetPid);
-    await update(ref(db, `lobbies/${lobbyCode}/private/${uid}`), {
-      [`target_r${round}`]: targetPid,
-      [`submitted_r${round}`]: true
-    });
+    const privateUpdate = { [`submitted_r${round}`]: true, [`target_r${round}`]: targetPid };
+    if (def && def.usesPerGame === 1) privateUpdate.abilityUsed = true;
+    await update(ref(db, `lobbies/${lobbyCode}/private/${uid}`), privateUpdate);
     renderNightAction();
   } catch (e) { console.error(e); toast('Could not submit — try again', true); }
 }
@@ -1008,38 +1059,39 @@ async function resolveNight() {
   // 5. Veteran kills visitors
   if (veteranAlerted) {
     Object.entries(visitedByUid).forEach(([actorUid, targetUid]) => {
-      // Did this actor visit the Veteran?
-      const visitedVet = targetUid === veteranUid || actorUid === doctorUid && doctorTarget === veteranUid;
-      if (targetUid === veteranUid || (actorUid === doctorUid && doctorTarget === veteranUid)) {
-        if (isAlive(actorUid)) {
-          // Doctor can protect a visitor to the Veteran
-          if (doctorTarget === actorUid && actorUid !== doctorUid) {
-            infoMsgs.push(`Someone who visited the Veteran was protected by the Doctor.`);
-          } else {
-            deaths.add(actorUid);
-            deathLog.push(`${playersNow[actorUid]?.name || 'A player'} visited the Veteran on Alert and did not survive.`);
-          }
-        }
+      // Only process actors who actually targeted the Veteran
+      const visitedVet = targetUid === veteranUid;
+      if (!visitedVet) return;
+      if (!isAlive(actorUid)) return;
+      // Doctor can protect a visitor (but not themselves — if Doctor visits Veteran
+      // and protected themselves, they still die: spec says Doctor protection doesn't
+      // apply to the Doctor's own visit to the Veteran)
+      if (doctorTarget === actorUid && actorUid !== doctorUid) {
+        infoMsgs.push(`Someone who visited the Veteran was protected by the Doctor.`);
+      } else {
+        deaths.add(actorUid);
+        deathLog.push(`${playersNow[actorUid]?.name || 'A player'} visited the Veteran on Alert and did not survive.`);
       }
     });
   }
 
   // 6. Werewolf kill
+  // Kill fails if the specific wolves who SUBMITTED the kill action are all silenced.
+  // Mage Werewolf silencing a base Werewolf should block the kill — check submitters only.
   const killActions = actions.werewolf || {};
   const { targetUid: wolfTarget } = tallyVotes(killActions);
-  // Werewolf team silenced = kill fails
-  const allWolvesInTeam = Object.keys(state.werewolfTeam || {});
-  const allWolvesSilenced = allWolvesInTeam.length > 0 &&
-    allWolvesInTeam.every(wuid => isSilenced(wuid));
-  if (wolfTarget && !allWolvesSilenced && isAlive(wolfTarget)) {
+  const killSubmitters = Object.keys(killActions);
+  const killBlocked = killSubmitters.length > 0 &&
+    killSubmitters.every(wuid => isSilenced(wuid));
+  if (wolfTarget && !killBlocked && isAlive(wolfTarget)) {
     if (doctorTarget === wolfTarget) {
       infoMsgs.push('The Werewolves attacked someone, but the Doctor protected them.');
     } else if (!deaths.has(wolfTarget)) {
       deaths.add(wolfTarget);
       deathLog.push(`${playersNow[wolfTarget]?.name || 'A player'} was found dead this morning.`);
     }
-  } else if (wolfTarget && !allWolvesSilenced) {
-    // Target already dead (from Veteran etc)
+  } else if (wolfTarget && !killBlocked && !isAlive(wolfTarget)) {
+    // Target already dead (e.g. Veteran killed them first)
     infoMsgs.push('The Werewolves attacked someone who had already fallen.');
   }
 
@@ -1048,76 +1100,101 @@ async function resolveNight() {
   const sheriffUid   = Object.keys(shootActions)[0];
   const shootTarget  = sheriffUid && !isSilenced(sheriffUid) ? shootActions[sheriffUid] : null;
   if (shootTarget && isAlive(sheriffUid)) {
-    const targetRole    = roles[shootTarget];
-    const targetIsWolf  = werewolfTeamKeys().includes(targetRole);
-    if (targetIsWolf) {
-      // Hit — target dies (Doctor can save the target)
-      if (doctorTarget === shootTarget) {
-        infoMsgs.push('The Sheriff fired — but the Doctor protected the target.');
-        updates[`lobbies/${code}/private/${sheriffUid}/sheriffResults/${round}`] =
-          { name: playersNow[shootTarget]?.name, hit: true, saved: true };
-      } else if (isAlive(shootTarget) && !deaths.has(shootTarget)) {
-        deaths.add(shootTarget);
-        deathLog.push(`The Sheriff's shot found its mark — ${playersNow[shootTarget]?.name || 'a player'} was a Werewolf.`);
-        updates[`lobbies/${code}/private/${sheriffUid}/sheriffResults/${round}`] =
-          { name: playersNow[shootTarget]?.name, hit: true };
-      }
+    // BUG 4 FIX: if the target died earlier this same night, the shot fails silently
+    if (!isAlive(shootTarget) || deaths.has(shootTarget)) {
+      infoMsgs.push('The Sheriff fired, but their target had already fallen.');
+      updates[`lobbies/${code}/private/${sheriffUid}/submitted_r${round}`] = true;
+      updates[`lobbies/${code}/private/${sheriffUid}/abilityUsed`]         = true;
     } else {
-      // Backfire — Sheriff dies (cannot be saved by Doctor)
-      if (isAlive(sheriffUid) && !deaths.has(sheriffUid)) {
+      const targetRole   = roles[shootTarget];
+      const targetIsWolf = werewolfTeamKeys().includes(targetRole);
+      if (targetIsWolf) {
+        // Hit — Doctor can save the target
+        if (doctorTarget === shootTarget) {
+          infoMsgs.push('The Sheriff fired — but the Doctor protected the target.');
+          updates[`lobbies/${code}/private/${sheriffUid}/sheriffResults/${round}`] =
+            { name: playersNow[shootTarget]?.name, hit: true, saved: true };
+        } else {
+          deaths.add(shootTarget);
+          deathLog.push(`The Sheriff's shot found its mark — ${playersNow[shootTarget]?.name || 'a player'} was a Werewolf.`);
+          updates[`lobbies/${code}/private/${sheriffUid}/sheriffResults/${round}`] =
+            { name: playersNow[shootTarget]?.name, hit: true };
+        }
+      } else {
+        // Backfire — Sheriff dies; Doctor cannot prevent backfire per spec
         deaths.add(sheriffUid);
-        deathLog.push(`The Sheriff's shot backfired — they were not a Werewolf. The Sheriff did not survive.`);
+        deathLog.push(`The Sheriff's shot backfired — ${playersNow[shootTarget]?.name || 'that player'} was not a Werewolf. The Sheriff did not survive.`);
         updates[`lobbies/${code}/private/${sheriffUid}/sheriffResults/${round}`] =
           { name: playersNow[shootTarget]?.name, hit: false };
       }
+      updates[`lobbies/${code}/private/${sheriffUid}/submitted_r${round}`] = true;
+      updates[`lobbies/${code}/private/${sheriffUid}/abilityUsed`]         = true;
     }
-    // Mark Sheriff's ability as used
-    updates[`lobbies/${code}/private/${sheriffUid}/submitted_r${round}`] = true;
   }
 
   // 8. Pirate duel
   const duelActions = actions.pirate || {};
   const pirateUid   = Object.keys(duelActions)[0];
-  const duelTarget  = pirateUid && !isSilenced(pirateUid) ? duelActions[pirateUid] : null;
-  if (duelTarget && isAlive(pirateUid)) {
-    // If Pirate visited the Veteran on Alert, Pirate dies instead of a duel
-    if (veteranAlerted && duelTarget === veteranUid) {
-      // Already handled above — Pirate dies visiting Veteran
-    } else if (isAlive(duelTarget)) {
-      // Check if target is Veteran on alert
-      if (veteranAlerted && duelTarget === veteranUid) {
-        // Pirate dies — handled in Veteran section
-      } else {
-        const pirateWins = Math.random() < 0.5;
-        const loser = pirateWins ? duelTarget : pirateUid;
-        const winner = pirateWins ? pirateUid : duelTarget;
-        const loserName = playersNow[loser]?.name || 'A player';
-        if (doctorTarget === loser && loser !== pirateUid) {
-          infoMsgs.push(`The Pirate's duel target was protected by the Doctor.`);
-        } else if (!deaths.has(loser) && isAlive(loser)) {
-          deaths.add(loser);
-          deathLog.push(`The Pirate's coin came up — ${loserName} lost the duel and did not survive.`);
-        }
-        updates[`lobbies/${code}/players/${pirateUid}/piratePrepping`] = false;
+  // If Pirate is silenced, clear their prep state so they aren't stuck
+  if (pirateUid && isSilenced(pirateUid)) {
+    infoMsgs.push(`The Pirate was silenced — their duel was blocked.`);
+    updates[`lobbies/${code}/piratePrepping/${pirateUid}`] = null;
+    updates[`lobbies/${code}/private/${pirateUid}/pirateUsed`] = true;
+  } else {
+    const duelTarget = pirateUid ? duelActions[pirateUid] : null;
+    if (duelTarget && isAlive(pirateUid)) {
+      if (!isAlive(duelTarget) || deaths.has(duelTarget)) {
+        // Target already dead — duel cancelled
+        infoMsgs.push(`The Pirate's duel target had already fallen — the duel was cancelled.`);
         updates[`lobbies/${code}/piratePrepping/${pirateUid}`] = null;
+        // Pirate does NOT get their ability back — it's used up
         updates[`lobbies/${code}/private/${pirateUid}/pirateUsed`] = true;
+      } else {
+        // Veteran check: if Pirate targets Veteran on alert, Pirate dies (handled in step 5)
+        // Don't re-resolve — the Pirate is already in deaths Set from step 5
+        if (veteranAlerted && duelTarget === veteranUid) {
+          // Pirate visited Veteran → already dead from step 5; just clear prep state
+          updates[`lobbies/${code}/piratePrepping/${pirateUid}`] = null;
+          updates[`lobbies/${code}/private/${pirateUid}/pirateUsed`] = true;
+        } else {
+          // Normal duel: coin toss
+          const pirateWins = Math.random() < 0.5;
+          const loser      = pirateWins ? duelTarget : pirateUid;
+          const loserName  = playersNow[loser]?.name || 'A player';
+          // Doctor can save the TARGET (not the Pirate if Pirate loses — spec says only target)
+          if (!pirateWins && doctorTarget === pirateUid) {
+            // Spec is silent on this — Doctor protecting Pirate who lost: allow it
+            infoMsgs.push(`The Pirate lost the duel but was protected by the Doctor.`);
+          } else if (pirateWins && doctorTarget === duelTarget) {
+            infoMsgs.push(`The Pirate's duel target was protected by the Doctor.`);
+          } else if (!deaths.has(loser)) {
+            deaths.add(loser);
+            deathLog.push(`The Pirate challenged ${playersNow[duelTarget]?.name || 'a player'} to a duel — ${loserName} did not survive.`);
+          }
+          updates[`lobbies/${code}/piratePrepping/${pirateUid}`] = null;
+          updates[`lobbies/${code}/private/${pirateUid}/pirateUsed`] = true;
+        }
       }
-    } else {
-      // Target already dead — duel cancelled
-      infoMsgs.push(`The Pirate's duel target had already fallen — the duel was cancelled.`);
-      updates[`lobbies/${code}/players/${pirateUid}/piratePrepping`] = false;
-      updates[`lobbies/${code}/piratePrepping/${pirateUid}`] = null;
     }
   }
 
   // 9. Poison from PREVIOUS round
   Object.entries(poisoned).forEach(([victimUid, roundPoisoned]) => {
     if (roundPoisoned !== round - 1) return; // only last round's poison
-    if (!isAlive(victimUid)) return;
-    if (doctorTarget === victimUid) {
-      infoMsgs.push('The Doctor cured someone of the Poisoner\'s poison.');
+    // Clear stale entries for already-dead players (BUG 10 fix)
+    if (!isAlive(victimUid)) {
       updates[`lobbies/${code}/poisoned/${victimUid}`] = null;
-    } else if (!deaths.has(victimUid)) {
+      return;
+    }
+    if (deaths.has(victimUid)) {
+      // Dying from something else this night — still clear the poison entry
+      updates[`lobbies/${code}/poisoned/${victimUid}`] = null;
+      return;
+    }
+    if (doctorTarget === victimUid) {
+      infoMsgs.push(`The Doctor cured someone of the Poisoner's poison.`);
+      updates[`lobbies/${code}/poisoned/${victimUid}`] = null;
+    } else {
       deaths.add(victimUid);
       deathLog.push(`${playersNow[victimUid]?.name || 'A player'} succumbed to poison in the night.`);
       updates[`lobbies/${code}/poisoned/${victimUid}`] = null;
@@ -1141,10 +1218,11 @@ async function resolveNight() {
     const canAdopt = deadRole && !['poisoner', 'jester', 'pirate', 'amnesiac'].includes(deadRole);
     if (canAdopt) {
       updates[`lobbies/${code}/secretRoles/${amnUid}`] = deadRole;
-      updates[`lobbies/${code}/private/${amnUid}/adoptedRole`] = deadRole;
-      // If adopted role is werewolf team, add to werewolf team
+      updates[`lobbies/${code}/private/${amnUid}/adoptedRole`]  = deadRole;
+      updates[`lobbies/${code}/private/${amnUid}/abilityUsed`]  = true;
+      // Adopted Werewolf: store role key in werewolfTeam (not just true)
       if (werewolfTeamKeys().includes(deadRole)) {
-        updates[`lobbies/${code}/werewolfTeam/${amnUid}`] = true;
+        updates[`lobbies/${code}/werewolfTeam/${amnUid}`] = deadRole;
       }
       infoMsgs.push('The Amnesiac remembered something in the dark…');
     }
@@ -1160,6 +1238,7 @@ async function resolveNight() {
       name: playersNow[trackedUid]?.name || '?', visited
     };
     updates[`lobbies/${code}/private/${trackerUid}/submitted_r${round}`] = true;
+    updates[`lobbies/${code}/private/${trackerUid}/abilityUsed`]         = true;
   });
 
   // 13. Seer results
@@ -1176,6 +1255,7 @@ async function resolveNight() {
       evilCount, total: 4
     };
     updates[`lobbies/${code}/private/${seerUid}/submitted_r${round}`] = true;
+    updates[`lobbies/${code}/private/${seerUid}/abilityUsed`]         = true;
   });
 
   // Apply deaths
@@ -1225,7 +1305,8 @@ async function resolveDay(isRevote = false) {
   const votes = votesSnap.val() || {};
   const roles = rolesSnap.val() || {};
 
-  // Mayor: hidden double vote weight
+  // Mayor's double vote is ALWAYS hidden (Mayor is never revealed per spec).
+  // We apply it from secretRoles directly — never from p.revealed.
   const weights = {};
   Object.entries(state.players).forEach(([pid, p]) => {
     if (p.alive === false) return;
@@ -1238,16 +1319,17 @@ async function resolveDay(isRevote = false) {
   const updates = {};
 
   if (tie && !isRevote) {
-    // Tie on first vote → trigger revote
+    // Tie on first vote → trigger revote; MUST clear current votes so players re-vote fresh
     const tied = tiedPlayers(votes, weights);
     const tiedObj = {};
     tied.forEach(pid => { tiedObj[pid] = true; });
     const names = tied.map(pid => state.players[pid]?.name).filter(Boolean).map(escapeHTML).join(' and ');
-    updates[`lobbies/${code}/revoteEligible`]         = tiedObj;
-    updates[`lobbies/${code}/phase`]                  = 'revote';
-    updates[`lobbies/${code}/phaseEndsAt`]            = Date.now() + (state.settings.daySeconds || 120) * 1000;
-    updates[`lobbies/${code}/paused`]                 = false;
-    updates[`lobbies/${code}/log/${newLogKey()}`]     = logEntry(
+    updates[`lobbies/${code}/revoteEligible`]     = tiedObj;
+    updates[`lobbies/${code}/votes/${round}`]     = null; // clear votes for fresh revote
+    updates[`lobbies/${code}/phase`]              = 'revote';
+    updates[`lobbies/${code}/phaseEndsAt`]        = Date.now() + (state.settings.daySeconds || 120) * 1000;
+    updates[`lobbies/${code}/paused`]             = false;
+    updates[`lobbies/${code}/log/${newLogKey()}`] = logEntry(
       `The vote is tied between ${names}. A revote begins — only they can be voted for.`, 'info'
     );
     await update(ref(db), updates);

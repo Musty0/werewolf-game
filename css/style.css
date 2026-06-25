@@ -512,6 +512,15 @@ input[type="text"]:focus, select:focus { background: rgba(255, 255, 255, 0.55); 
   color: var(--blood); border: 1px solid var(--blood); border-radius: 2px; padding: 1px 6px;
 }
 
+/* ── Kick button (host-only, waiting room) ── */
+.kick-btn {
+  margin-left: auto;
+  padding: 2px 8px;
+  font-size: 0.7rem;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
 /* ── Spectator badge ── */
 .spectator-badge {
   text-align: center;
