@@ -43,6 +43,23 @@ const fbApp = initializeApp(firebaseConfig);
 const auth = getAuth(fbApp);
 const db = getDatabase(fbApp);
 
+// ASSET PRELOADING
+// All role icons + player avatars are small (under 1MB total combined) -- warm
+// the browser cache immediately on load so nothing pops in slowly later,
+// even for first-time visitors with an empty cache.
+(function preloadAssets() {
+  const roleIconPaths = Object.values(ROLE_DEFS).map(function (def) {
+    return def.icon;
+  });
+  const avatarPaths = [];
+  for (var n = 1; n <= 10; n++)
+    avatarPaths.push("img/avatars/player" + n + ".png");
+  roleIconPaths.concat(avatarPaths).forEach(function (src) {
+    var img = new Image();
+    img.src = src;
+  });
+})();
+
 // Wraps any promise with a timeout so Firebase hangs fail loudly instead of silently.
 // databaseURL mismatches are the most common cause of silent hangs.
 function withTimeout(promise, ms = 8000, label = "operation") {
@@ -132,6 +149,18 @@ function showScreen(name) {
   ["landing", "waiting", "game", "end"].forEach((k) =>
     $(`screen-${k}`).classList.toggle("hidden", k !== name),
   );
+  // Hide the entire HUD on landing — nothing there makes sense before joining a lobby
+  const hud = document.getElementById("global-hud");
+  const specBadge = document.getElementById("hud-spectator-badge");
+  if (hud) hud.classList.toggle("hidden", name === "landing");
+  if (specBadge) specBadge.classList.toggle("hidden", true);
+  // Hide role button until in-game (role is only assigned when game starts)
+  const roleBtn = document.getElementById("hud-role-btn");
+  if (roleBtn)
+    roleBtn.classList.toggle(
+      "hidden",
+      name === "landing" || name === "waiting",
+    );
 }
 
 function escHTML(s) {
@@ -231,14 +260,41 @@ $("hud-role-btn").addEventListener("click", () => {
 });
 
 // ── SETTINGS PANEL ────────────────────────────────────────────────────
-$("hud-settings-btn").addEventListener("click", () =>
-  openModal("settings-modal"),
-);
+$("hud-settings-btn").addEventListener("click", () => {
+  settingsShowMain();
+  openModal("settings-modal");
+});
 $("settings-modal-close").addEventListener("click", () =>
   closeModal("settings-modal"),
 );
 
-// Roles reference inside settings — populated on open
+// Sub-panel navigation
+function settingsShowMain() {
+  $("settings-main-menu").classList.remove("hidden");
+  ["players", "roles", "host"].forEach((p) =>
+    $("settings-sub-" + p)?.classList.add("hidden"),
+  );
+}
+function settingsShowSub(name) {
+  $("settings-main-menu").classList.add("hidden");
+  ["players", "roles", "host"].forEach((p) => {
+    const el = $("settings-sub-" + p);
+    if (el) el.classList.toggle("hidden", p !== name);
+  });
+}
+
+$("settings-btn-players").addEventListener("click", () =>
+  settingsShowSub("players"),
+);
+$("settings-btn-roles").addEventListener("click", () =>
+  settingsShowSub("roles"),
+);
+$("settings-btn-host").addEventListener("click", () => settingsShowSub("host"));
+$("settings-back-players").addEventListener("click", settingsShowMain);
+$("settings-back-roles").addEventListener("click", settingsShowMain);
+$("settings-back-host").addEventListener("click", settingsShowMain);
+
+// Role popup from role reference list
 $("settings-modal").addEventListener("click", (e) => {
   const roleBtn = e.target.closest("[data-role-popup]");
   if (roleBtn) openRolePopup(roleBtn.dataset.rolePopup);
@@ -247,8 +303,9 @@ $("settings-modal").addEventListener("click", (e) => {
 function buildSettingsPanel(game) {
   if (!game) return;
   const phase = game.phase || "lobby";
+  const inGame = phase !== "lobby" && phase !== "end";
 
-  // Player list
+  // ── Player list (built fresh each time)
   const listEl = $("settings-player-list");
   listEl.innerHTML = "";
   const players = game.players || {};
@@ -263,73 +320,85 @@ function buildSettingsPanel(game) {
           : "";
       const transferBtn =
         isHost && puid !== uid
-          ? `<button class="btn-ghost btn-xs transfer-host-btn" data-uid="${escHTML(puid)}" title="Make host">👑</button>`
-          : "";
+          ? `<button class="btn-ghost btn-xs transfer-host-btn" data-uid="${escHTML(puid)}" title="Make host">👑 Make host</button>`
+          : puid === uid
+            ? '<span class="you-badge">You</span>'
+            : "";
       row.innerHTML = `
         <img src="${escHTML(p.avatar || "img/avatars/player1.png")}" class="settings-avatar"
              style="border-color:${escHTML(p.colour || "#888")}">
-        <span class="settings-pname">${escHTML(p.name)}${!p.alive ? ' <span class="dead-label">(dead)</span>' : ""}</span>
+        <span class="settings-pname">${escHTML(p.name)}${!p.alive && phase !== "lobby" ? ' <span class="dead-label">(dead)</span>' : ""}</span>
         ${connBadge}${transferBtn}
       `;
       listEl.appendChild(row);
     });
-
-  // Transfer host buttons
   listEl
     .querySelectorAll(".transfer-host-btn")
     .forEach((btn) =>
       btn.addEventListener("click", () => transferHostTo(btn.dataset.uid)),
     );
 
-  // Roles reference list
+  // ── Role reference list — only build once (icons are static, no need to rebuild)
   const rolesListEl = $("settings-roles-list");
-  rolesListEl.innerHTML = "";
-  optionalRoleKeysByTeam().forEach(({ team, keys }) => {
-    const heading = document.createElement("p");
-    heading.className = "roles-group-heading";
-    heading.textContent = teamDisplayLabel(team);
-    rolesListEl.appendChild(heading);
-    keys.forEach((rk) => {
-      const def = ROLE_DEFS[rk];
-      const btn = document.createElement("button");
-      btn.className = "role-list-item";
-      btn.dataset.rolePopup = rk;
-      btn.innerHTML = `<img src="${def.icon}" class="role-list-icon" alt="">
-                       <span>${escHTML(def.name)}</span>`;
-      rolesListEl.appendChild(btn);
+  if (!rolesListEl.dataset.built) {
+    rolesListEl.dataset.built = "1";
+    const allKeys = [...optionalRoleKeys(), "werewolf", "villager"];
+    optionalRoleKeysByTeam().forEach(({ team, keys }) => {
+      const heading = document.createElement("p");
+      heading.className = "roles-group-heading";
+      heading.textContent = teamDisplayLabel(team);
+      rolesListEl.appendChild(heading);
+      keys.forEach((rk) => appendRoleListItem(rolesListEl, rk));
     });
-  });
-  // Also add base roles
-  ["werewolf", "villager"].forEach((rk) => {
-    const def = ROLE_DEFS[rk];
-    const btn = document.createElement("button");
-    btn.className = "role-list-item";
-    btn.dataset.rolePopup = rk;
-    btn.innerHTML = `<img src="${def.icon}" class="role-list-icon" alt=""><span>${escHTML(def.name)}</span>`;
-    $("settings-roles-list").appendChild(btn);
-  });
+    // Base roles at bottom
+    const baseHeading = document.createElement("p");
+    baseHeading.className = "roles-group-heading";
+    baseHeading.textContent = "Base roles";
+    rolesListEl.appendChild(baseHeading);
+    ["werewolf", "villager"].forEach((rk) =>
+      appendRoleListItem(rolesListEl, rk),
+    );
+  }
 
-  // Host sub-panel visibility
-  $("settings-host-section").classList.toggle("hidden", !isHost);
+  // ── Host controls button — visible only to host
+  $("settings-btn-host").classList.toggle("hidden", !isHost);
 
-  // Pause/resume buttons — only in game phase
-  const inGame = phase !== "lobby" && phase !== "end";
-  $("settings-pause-btn").classList.toggle(
-    "hidden",
-    !isHost || !inGame || !!game.paused,
-  );
-  $("settings-resume-btn").classList.toggle(
-    "hidden",
-    !isHost || !inGame || !game.paused,
-  );
+  // ── Host sub-panel controls
+  $("settings-pause-btn").classList.toggle("hidden", !inGame || !!game.paused);
+  $("settings-resume-btn").classList.toggle("hidden", !inGame || !game.paused);
+  $("settings-hunt-rules-btn").classList.toggle("hidden", phase !== "lobby");
 
-  // Hunt Rules — only in lobby
-  $("settings-hunt-rules-btn").classList.toggle(
-    "hidden",
-    !isHost || phase !== "lobby",
-  );
+  // ── Transfer host list inside host sub-panel
+  const transferEl = $("settings-transfer-list");
+  transferEl.innerHTML = "";
+  if (isHost && Object.keys(players).length > 1) {
+    const heading = document.createElement("p");
+    heading.className = "settings-section-heading";
+    heading.textContent = "Transfer host";
+    transferEl.appendChild(heading);
+    Object.entries(players)
+      .filter(([puid]) => puid !== uid)
+      .sort((a, b) => (a[1].joinOrder || 0) - (b[1].joinOrder || 0))
+      .forEach(([puid, p]) => {
+        const btn = document.createElement("button");
+        btn.className = "btn-ghost btn-block";
+        btn.style.marginBottom = "6px";
+        btn.textContent = "👑 Make " + (p.name || "them") + " host";
+        btn.addEventListener("click", () => transferHostTo(puid));
+        transferEl.appendChild(btn);
+      });
+  }
+}
 
-  // Leave button always visible
+function appendRoleListItem(container, rk) {
+  const def = ROLE_DEFS[rk];
+  if (!def) return;
+  const btn = document.createElement("button");
+  btn.className = "role-list-item";
+  btn.dataset.rolePopup = rk;
+  btn.innerHTML = `<img src="${escHTML(def.icon)}" class="role-list-icon" alt="">
+                   <span>${escHTML(def.name)}</span>`;
+  container.appendChild(btn);
 }
 
 $("settings-leave-btn").addEventListener("click", () => {

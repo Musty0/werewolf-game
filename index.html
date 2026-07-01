@@ -49,6 +49,9 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="css/style.css" />
+    <!-- Preload hints for the two most-common role icons — starts fetching before JS runs -->
+    <link rel="preload" as="image" href="img/roles/villager.png" />
+    <link rel="preload" as="image" href="img/roles/werewolf.png" />
   </head>
   <body>
     <div class="config-warning hidden" id="config-warning">
@@ -354,22 +357,86 @@
         >
           &times;
         </button>
-        <span class="card-label">Settings</span>
 
-        <!-- Player list -->
-        <p class="settings-section-heading">Players</p>
-        <div id="settings-player-list" class="settings-player-list"></div>
+        <!-- Main menu -->
+        <div class="settings-menu" id="settings-main-menu">
+          <span class="card-label" style="margin-bottom: 12px; display: block"
+            >Settings</span
+          >
+          <button
+            class="settings-menu-btn"
+            id="settings-btn-players"
+            type="button"
+          >
+            <span class="settings-menu-icon">👥</span>
+            <span class="settings-menu-label">Players</span>
+            <span class="settings-menu-arrow">›</span>
+          </button>
+          <button
+            class="settings-menu-btn"
+            id="settings-btn-roles"
+            type="button"
+          >
+            <span class="settings-menu-icon">🃏</span>
+            <span class="settings-menu-label">Role Reference</span>
+            <span class="settings-menu-arrow">›</span>
+          </button>
+          <button
+            class="settings-menu-btn hidden"
+            id="settings-btn-host"
+            type="button"
+          >
+            <span class="settings-menu-icon">⚙️</span>
+            <span class="settings-menu-label">Host Controls</span>
+            <span class="settings-menu-arrow">›</span>
+          </button>
+          <div class="settings-menu-divider"></div>
+          <button
+            class="btn-danger btn-block"
+            id="settings-leave-btn"
+            type="button"
+          >
+            Leave lobby
+          </button>
+        </div>
 
-        <!-- Roles reference -->
-        <p class="settings-section-heading">Roles in this game</p>
-        <div id="settings-roles-list" class="settings-roles-list"></div>
+        <!-- Players sub-panel -->
+        <div class="settings-subpanel hidden" id="settings-sub-players">
+          <button
+            class="settings-back-btn"
+            id="settings-back-players"
+            type="button"
+          >
+            ‹ Back
+          </button>
+          <p class="settings-subpanel-heading">Players</p>
+          <div id="settings-player-list" class="settings-player-list"></div>
+        </div>
 
-        <!-- Host sub-section (host only) -->
-        <div id="settings-host-section" class="hidden">
-          <p class="settings-section-heading host-section-heading">
-            ⚙️ Host Controls
-          </p>
-          <div class="btn-stack">
+        <!-- Role reference sub-panel -->
+        <div class="settings-subpanel hidden" id="settings-sub-roles">
+          <button
+            class="settings-back-btn"
+            id="settings-back-roles"
+            type="button"
+          >
+            ‹ Back
+          </button>
+          <p class="settings-subpanel-heading">Role Reference</p>
+          <div id="settings-roles-list" class="settings-roles-list"></div>
+        </div>
+
+        <!-- Host controls sub-panel -->
+        <div class="settings-subpanel hidden" id="settings-sub-host">
+          <button
+            class="settings-back-btn"
+            id="settings-back-host"
+            type="button"
+          >
+            ‹ Back
+          </button>
+          <p class="settings-subpanel-heading">Host Controls</p>
+          <div class="btn-stack" style="margin-top: 10px">
             <button class="btn-ghost" id="settings-pause-btn" type="button">
               ⏸ Pause timer
             </button>
@@ -384,18 +451,11 @@
               📜 Hunt Rules
             </button>
           </div>
+          <div id="settings-transfer-list" style="margin-top: 12px"></div>
         </div>
 
-        <!-- Leave -->
-        <div class="settings-leave-wrap">
-          <button
-            class="btn-danger btn-block"
-            id="settings-leave-btn"
-            type="button"
-          >
-            Leave lobby
-          </button>
-        </div>
+        <!-- Compatibility shim -->
+        <div id="settings-host-section" class="hidden"></div>
       </div>
     </div>
 
