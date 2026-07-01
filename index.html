@@ -1,266 +1,484 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
-<title>Werewolf</title>
-<meta name="description" content="A free, no-install Werewolf party game. Create a lobby, share the link, play in any phone browser.">
-<meta name="theme-color" content="#16171a">
-<link rel="manifest" href="manifest.json">
-<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
-<link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png">
-<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Werewolf">
-<script>
-  (function () {
-    var params = new URLSearchParams(location.search);
-    var p = params.get('p');
-    if (p) {
-      var base = location.pathname.replace(/\/$/, '');
-      history.replaceState(null, '', base + p);
-    }
-  })();
-</script>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=UnifrakturCook:wght@700&family=IM+Fell+English:ital@0;1&family=IM+Fell+English+SC&family=Caveat:wght@400;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css">
-</head>
-<body>
-<div class="config-warning hidden" id="config-warning">
-  ⚠️ Firebase isn't set up yet — edit <code>js/firebase-config.js</code> with your real project values (README steps 1–4).
-</div>
-<div class="app-shell">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"
+    />
+    <title>Werewolf</title>
+    <meta
+      name="description"
+      content="A free, no-install Werewolf party game. Create a lobby, share the code, play on any phone."
+    />
+    <meta name="theme-color" content="#16171a" />
+    <link rel="manifest" href="manifest.json" />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="32x32"
+      href="icons/favicon-32.png"
+    />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="16x16"
+      href="icons/favicon-16.png"
+    />
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
+    <meta name="apple-mobile-web-app-title" content="Werewolf" />
+    <script>
+      (function () {
+        var params = new URLSearchParams(location.search);
+        var p = params.get("p");
+        if (p) {
+          var base = location.pathname.replace(/\/$/, "");
+          history.replaceState(null, "", base + p);
+        }
+      })();
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=UnifrakturCook:wght@700&family=IM+Fell+English:ital@0;1&family=IM+Fell+English+SC&family=Caveat:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/style.css" />
+  </head>
+  <body>
+    <div class="config-warning hidden" id="config-warning">
+      ⚠️ Firebase isn't configured yet — edit
+      <code>js/firebase-config.js</code> with your project values.
+    </div>
 
-  <!-- ============ LANDING ============ -->
-  <section id="screen-landing" class="screen">
-    <div class="screen-header brand">
-      <h1>Werewolf</h1>
-      <div class="header-icon-row">
-        <button class="icon-btn" id="open-help-btn" type="button" aria-label="How to play">❓</button>
-        <button class="icon-btn" id="open-roles-btn" type="button" aria-label="Roles">🐺</button>
+    <!-- ═══════════════════════════════════════════════════════════════════
+     GLOBAL HUD — floating bar, always visible on every screen
+     ═══════════════════════════════════════════════════════════════════ -->
+    <div class="global-hud" id="global-hud">
+      <span class="hud-code" id="hud-lobby-code"></span>
+      <div class="hud-center">
+        <span class="hud-phase" id="hud-phase"></span>
+        <span class="hud-round" id="hud-round"></span>
+        <span class="hud-timer hidden" id="hud-timer"></span>
       </div>
-    </div>
-    <div class="screen-body">
-      <div class="landing-stack">
-        <div class="card" id="panel-create">
-          <span class="card-label">Start a new hunt</span>
-          <div class="field">
-            <label for="create-name-input">Your name</label>
-            <input type="text" id="create-name-input" placeholder="e.g. Sam" maxlength="20" autocomplete="off">
-          </div>
-          <button id="create-lobby-btn" class="btn-primary btn-block">Create lobby</button>
-        </div>
-        <div class="divider-or">or</div>
-        <div class="card" id="panel-join">
-          <span class="card-label">Join a hunt</span>
-          <div class="field">
-            <label for="join-name-input">Your name</label>
-            <input type="text" id="join-name-input" placeholder="e.g. Sam" maxlength="20" autocomplete="off">
-          </div>
-          <div class="field">
-            <label for="join-code-input">Lobby code</label>
-            <input type="text" id="join-code-input" placeholder="K7X92" maxlength="6" autocomplete="off">
-          </div>
-          <button id="join-lobby-btn" class="btn-ghost btn-block">Join lobby</button>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ WAITING ROOM ============ -->
-  <section id="screen-waiting" class="screen hidden">
-    <div class="screen-header brand">
-      <h1 class="title-sm" id="waiting-title">Werewolf</h1>
-      <div class="lobby-code-display">
-        <span class="code" id="waiting-code">------</span>
-        <button class="btn-ghost btn-sm" id="copy-link-btn">Copy link</button>
-      </div>
-    </div>
-    <div class="screen-body">
-      <div class="card">
-        <span class="card-label">The accused (<span id="player-count">0</span>)</span>
-        <div class="player-list" id="waiting-player-list"></div>
-      </div>
-    </div>
-    <div class="screen-footer">
-      <div class="footer-row hidden" id="host-footer-row">
-        <button class="btn-ghost" id="open-settings-btn" type="button">Hunt rules</button>
-        <button class="btn-primary" id="start-game-btn" type="button">Start game</button>
-      </div>
-      <p class="muted-note" id="start-game-hint"></p>
-      <p class="muted-note hidden" id="waiting-non-host-note">Waiting for the host to begin the hunt…</p>
-    </div>
-  </section>
-
-  <!-- ============ GAME ============ -->
-  <section id="screen-game" class="screen hidden">
-    <div class="screen-header">
-      <div class="town-clock-wrap">
-        <div class="town-clock" id="town-clock">
-          <div class="town-clock-inner">
-            <span class="town-clock-phase" id="clock-phase">Night</span>
-            <div class="town-clock-time" id="clock-time">1:00</div>
-          </div>
-        </div>
-      </div>
-      <div class="town-clock-round" id="clock-round">Round 1</div>
-      <div class="game-header-row">
-        <button class="role-chip" id="role-chip-btn" type="button">
-          <span class="chip-icon" id="role-chip-icon">🧑‍🌾</span>
-          <span id="role-chip-name">Villager</span>
+      <div class="hud-right">
+        <button
+          class="hud-btn"
+          id="hud-role-btn"
+          type="button"
+          aria-label="Your role"
+        >
+          <img id="hud-role-icon" src="img/roles/villager.png" alt="role" />
         </button>
-        <button class="icon-btn hidden" id="pause-btn" type="button" aria-label="Pause timer">⏸</button>
-        <button class="icon-btn hidden" id="resume-btn" type="button" aria-label="Resume timer">▶️</button>
-        <button class="icon-btn" id="open-log-btn" type="button" aria-label="The town crier">📜<span class="dot hidden" id="log-dot"></span></button>
-        <button class="icon-btn" id="open-roster-btn" type="button" aria-label="The accused">👥</button>
+        <button
+          class="hud-btn"
+          id="hud-log-btn"
+          type="button"
+          aria-label="Event log"
+        >
+          📜
+        </button>
+        <button
+          class="hud-btn"
+          id="hud-settings-btn"
+          type="button"
+          aria-label="Settings"
+        >
+          ⚙️
+        </button>
       </div>
-      <div class="spectator-badge hidden" id="spectator-badge">👁 You are spectating</div>
     </div>
-    <div class="screen-body" id="game-body">
-      <div class="card hidden" id="night-action-card">
-        <span class="card-label" id="night-action-label">Choose your target</span>
-        <div id="night-action-targets"></div>
-        <p class="muted-note" id="night-action-status"></p>
-        <button class="btn-primary hidden" id="seer-confirm-btn" type="button">Confirm selection</button>
+
+    <div class="spectator-hud-badge hidden" id="hud-spectator-badge">
+      👁 Spectating
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════
+     SCREENS
+     ═══════════════════════════════════════════════════════════════════ -->
+    <div class="app-shell">
+      <!-- ── LANDING ──────────────────────────────────────────────────── -->
+      <section id="screen-landing" class="screen">
+        <div class="screen-header brand">
+          <h1>Werewolf</h1>
+        </div>
+        <div class="screen-body">
+          <div class="landing-stack">
+            <!-- Auth loading overlay (hidden once Firebase auth completes) -->
+            <div id="auth-overlay" class="auth-overlay">
+              <span class="auth-spinner">☽</span> Connecting…
+            </div>
+
+            <!-- Error banner (hidden unless something goes wrong) -->
+            <p id="landing-error" class="landing-error hidden"></p>
+
+            <div class="card" id="panel-create">
+              <span class="card-label">Start a new hunt</span>
+              <div class="field">
+                <label for="create-name-input">Your name</label>
+                <input
+                  type="text"
+                  id="create-name-input"
+                  placeholder="e.g. Sam"
+                  maxlength="20"
+                  autocomplete="off"
+                />
+              </div>
+              <button
+                id="create-lobby-btn"
+                class="btn-primary btn-block"
+                type="button"
+                disabled
+              >
+                Create lobby
+              </button>
+            </div>
+            <div class="divider-or">or</div>
+            <div class="card" id="panel-join">
+              <span class="card-label">Join a hunt</span>
+              <div class="field">
+                <label for="join-name-input">Your name</label>
+                <input
+                  type="text"
+                  id="join-name-input"
+                  placeholder="e.g. Sam"
+                  maxlength="20"
+                  autocomplete="off"
+                />
+              </div>
+              <div class="field">
+                <label for="join-code-input">Lobby code</label>
+                <input
+                  type="text"
+                  id="join-code-input"
+                  placeholder="K7X92"
+                  maxlength="6"
+                  autocomplete="off"
+                  style="text-transform: uppercase"
+                />
+              </div>
+              <button
+                id="join-lobby-btn"
+                class="btn-ghost btn-block"
+                type="button"
+                disabled
+              >
+                Join lobby
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── WAITING ROOM ──────────────────────────────────────────────── -->
+      <section id="screen-waiting" class="screen hidden">
+        <div class="screen-header brand">
+          <h1 class="title-sm">Werewolf</h1>
+          <div class="lobby-code-display">
+            <span class="code" id="waiting-code">------</span>
+            <button class="btn-ghost btn-sm" id="copy-link-btn" type="button">
+              Copy link
+            </button>
+          </div>
+        </div>
+        <div class="screen-body">
+          <div class="card">
+            <span class="card-label"
+              >The accused (<span id="player-count">0</span>)</span
+            >
+            <div class="player-list" id="waiting-player-list"></div>
+          </div>
+        </div>
+        <div class="screen-footer">
+          <div class="footer-row hidden" id="host-footer-row">
+            <button
+              class="btn-primary btn-block"
+              id="start-game-btn"
+              type="button"
+            >
+              Begin the Hunt
+            </button>
+          </div>
+          <p class="muted-note" id="start-game-hint"></p>
+          <p class="muted-note hidden" id="waiting-non-host-note">
+            Waiting for the host to begin the hunt…
+          </p>
+        </div>
+      </section>
+
+      <!-- ── GAME ─────────────────────────────────────────────────────── -->
+      <section id="screen-game" class="screen hidden">
+        <!-- Spectator overlay banner -->
+        <div class="spectator-overlay hidden" id="spectator-overlay">
+          <span>👁 You are spectating — watch but do not speak</span>
+        </div>
+
+        <!-- Silenced indicator -->
+        <div class="silenced-badge hidden" id="silenced-badge">🔇 Silenced</div>
+
+        <!-- Wolf pack display (werewolf team only) -->
+        <div class="wolf-pack-display hidden" id="wolf-pack-display"></div>
+
+        <div class="screen-body" id="game-body">
+          <!-- Night action card -->
+          <div class="card hidden" id="night-action-card">
+            <span class="card-label" id="night-action-label"
+              >Choose your action</span
+            >
+            <div id="night-action-targets" class="target-list"></div>
+            <p class="muted-note" id="night-action-status"></p>
+          </div>
+
+          <!-- Morning report card -->
+          <div class="card hidden" id="morning-report-card">
+            <span class="card-label">☀ Morning Report</span>
+            <div id="morning-report-content" class="morning-content"></div>
+          </div>
+
+          <!-- Day voting card (Among-Us style grid) -->
+          <div class="card hidden" id="day-vote-card">
+            <span class="card-label" id="day-vote-label">Cast your vote</span>
+            <p class="muted-note hidden" id="revote-note"></p>
+            <div id="day-vote-targets" class="vote-grid"></div>
+            <p class="vote-skip-note muted-note hidden" id="vote-skip-note">
+              Tap a card to vote. Skip if you have no suspicions.
+            </p>
+          </div>
+
+          <!-- Role reveal choice (appears after death) -->
+          <div class="card hidden" id="reveal-choice-card">
+            <span class="card-label">You have been eliminated</span>
+            <p>Do you wish to reveal your role to the town?</p>
+            <div class="btn-row">
+              <button class="btn-primary" id="reveal-yes-btn" type="button">
+                Reveal my role
+              </button>
+              <button class="btn-ghost" id="reveal-no-btn" type="button">
+                Keep it hidden
+              </button>
+            </div>
+          </div>
+
+          <!-- Animation card (coin toss / random pick) -->
+          <div class="card hidden" id="animation-card">
+            <!-- content injected by renderAnimation() -->
+          </div>
+
+          <!-- No-action note -->
+          <p class="empty-note hidden" id="no-action-note"></p>
+        </div>
+        <!-- /.screen-body -->
+
+        <div class="screen-footer">
+          <div class="footer-row" id="game-footer-row">
+            <button
+              class="btn-ghost hidden"
+              id="morning-advance-btn"
+              type="button"
+            >
+              Continue to Day →
+            </button>
+            <button class="btn-primary hidden" id="resolve-btn" type="button">
+              Resolve
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── END SCREEN ────────────────────────────────────────────────── -->
+      <section id="screen-end" class="screen hidden">
+        <div class="screen-header">
+          <div class="card end-banner">
+            <span class="card-label">The verdict</span>
+            <div class="winner-label" id="winner-label">The Hunt is over</div>
+            <p id="winner-sub"></p>
+          </div>
+        </div>
+        <div class="screen-body">
+          <div class="card">
+            <span class="card-label">Every soul, unmasked</span>
+            <div class="player-list" id="end-role-list"></div>
+          </div>
+        </div>
+        <div class="screen-footer">
+          <div class="footer-row hidden" id="end-host-card">
+            <button
+              id="play-again-btn"
+              class="btn-primary btn-block"
+              type="button"
+            >
+              Play again with this group
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+    <!-- /.app-shell -->
+
+    <!-- ═══════════════════════════════════════════════════════════════════
+     MODALS
+     ═══════════════════════════════════════════════════════════════════ -->
+
+    <!-- ── Role popup (universal — HUD role btn, settings roles list, hunt rules) -->
+    <div class="modal-overlay hidden" id="role-popup-modal">
+      <div class="modal-box role-detail">
+        <button
+          class="modal-close"
+          id="role-popup-modal-close"
+          type="button"
+          aria-label="Close"
+        >
+          &times;
+        </button>
+        <img class="role-popup-icon" id="role-popup-icon" src="" alt="" />
+        <span class="role-team" id="role-popup-team">Villagers</span>
+        <div class="role-name" id="role-popup-name"></div>
+        <p class="role-blurb" id="role-popup-blurb"></p>
+        <ul class="role-bullets" id="role-popup-bullets"></ul>
+        <div class="role-popup-pack hidden" id="role-popup-pack"></div>
       </div>
-      <div class="card hidden" id="day-vote-card">
-        <span class="card-label" id="day-vote-label">Cast your vote</span>
-        <p class="muted-note hidden" id="revote-note"></p>
-        <div id="day-vote-targets"></div>
-      </div>
-      <div class="card hidden" id="pirate-prep-card">
-        <span class="card-label">Pirate — Prepare for duel</span>
-        <p>Declare your preparation: you cannot speak or vote today. Tomorrow night you may challenge someone to a duel.</p>
-        <button class="btn-danger btn-block" id="pirate-prep-btn" type="button">🏴‍☠️ Begin preparation (silences you today)</button>
-      </div>
-      <div class="card hidden" id="reveal-choice-card">
-        <span class="card-label">You have been eliminated</span>
-        <p>Do you want to reveal your role to the town?</p>
-        <div class="btn-row">
-          <button class="btn-primary" id="reveal-yes-btn" type="button">Reveal my role</button>
-          <button class="btn-ghost" id="reveal-no-btn" type="button">Keep it hidden</button>
+    </div>
+
+    <!-- ── Settings panel (⚙️ — all players) -->
+    <div class="modal-overlay hidden" id="settings-modal">
+      <div class="modal-box settings-box">
+        <button
+          class="modal-close"
+          id="settings-modal-close"
+          type="button"
+          aria-label="Close"
+        >
+          &times;
+        </button>
+        <span class="card-label">Settings</span>
+
+        <!-- Player list -->
+        <p class="settings-section-heading">Players</p>
+        <div id="settings-player-list" class="settings-player-list"></div>
+
+        <!-- Roles reference -->
+        <p class="settings-section-heading">Roles in this game</p>
+        <div id="settings-roles-list" class="settings-roles-list"></div>
+
+        <!-- Host sub-section (host only) -->
+        <div id="settings-host-section" class="hidden">
+          <p class="settings-section-heading host-section-heading">
+            ⚙️ Host Controls
+          </p>
+          <div class="btn-stack">
+            <button class="btn-ghost" id="settings-pause-btn" type="button">
+              ⏸ Pause timer
+            </button>
+            <button class="btn-ghost" id="settings-resume-btn" type="button">
+              ▶ Resume timer
+            </button>
+            <button
+              class="btn-ghost"
+              id="settings-hunt-rules-btn"
+              type="button"
+            >
+              📜 Hunt Rules
+            </button>
+          </div>
+        </div>
+
+        <!-- Leave -->
+        <div class="settings-leave-wrap">
+          <button
+            class="btn-danger btn-block"
+            id="settings-leave-btn"
+            type="button"
+          >
+            Leave lobby
+          </button>
         </div>
       </div>
-      <p class="empty-note hidden" id="no-action-note"></p>
     </div>
-    <div class="screen-footer">
-      <div class="footer-row hidden" id="host-controls-card">
-        <button id="resolve-now-btn" class="btn-primary">Resolve now</button>
-      </div>
-    </div>
-  </section>
 
-  <!-- ============ END SCREEN ============ -->
-  <section id="screen-end" class="screen hidden">
-    <div class="screen-header">
-      <div class="card end-banner">
-        <span class="card-label">The verdict</span>
-        <div class="winner-label" id="winner-label">Villagers win</div>
-        <p id="winner-sub"></p>
-      </div>
-    </div>
-    <div class="screen-body">
-      <div class="card">
-        <span class="card-label">Every soul, unmasked</span>
-        <div class="player-list" id="end-role-list"></div>
-      </div>
-    </div>
-    <div class="screen-footer">
-      <div class="footer-row hidden" id="end-host-card">
-        <button id="play-again-btn" class="btn-primary btn-block">Play again with this group</button>
-      </div>
-    </div>
-  </section>
+    <!-- ── Hunt Rules (host only, lobby only — nested within settings) -->
+    <div class="modal-overlay hidden" id="hunt-rules-modal">
+      <div class="modal-box">
+        <button
+          class="modal-close"
+          id="hunt-rules-modal-close"
+          type="button"
+          aria-label="Close"
+        >
+          &times;
+        </button>
+        <span class="card-label"
+          >Hunt Rules <span class="host-only-badge">Host only</span></span
+        >
 
-  <!-- ============ MODALS ============ -->
-
-  <!-- Help -->
-  <div class="modal-overlay hidden" id="help-modal">
-    <div class="modal-box">
-      <button class="modal-close" id="help-modal-close" type="button" aria-label="Close">&times;</button>
-      <span class="card-label">How to play</span>
-      <ol class="help-list">
-        <li>One person creates a lobby and shares the code or link with friends.</li>
-        <li>The host picks the roles in play and how long Night and Day last, then starts the hunt.</li>
-        <li>Each <strong>Night</strong>, the Werewolves secretly choose someone to eliminate, while other special roles quietly use their own powers.</li>
-        <li>Each <strong>Day</strong>, everyone discusses and votes to eliminate a suspect. If there is a tie, a revote happens between only the tied players.</li>
-        <li>When you die you become a spectator — you can see everything but cannot act or speak to living players.</li>
-        <li>When eliminated, you choose whether to reveal your role or keep it hidden.</li>
-        <li>Tap your role badge any time to see your role again. Use 📜 for the event log and 👥 for the full roster.</li>
-      </ol>
-    </div>
-  </div>
-
-  <!-- Roles reference -->
-  <div class="modal-overlay hidden" id="roles-modal">
-    <div class="modal-box">
-      <button class="modal-close" id="roles-modal-close" type="button" aria-label="Close">&times;</button>
-      <span class="card-label">Roles</span>
-      <div id="roles-reference-list"></div>
-    </div>
-  </div>
-
-  <!-- Role detail (in-game) -->
-  <div class="modal-overlay hidden" id="role-modal">
-    <div class="modal-box role-detail">
-      <button class="modal-close" id="role-modal-close" type="button" aria-label="Close">&times;</button>
-      <span class="role-icon" id="role-icon">🧑‍🌾</span>
-      <span class="role-team" id="role-team">Town</span>
-      <div class="role-name" id="role-name">Villager</div>
-      <p id="role-blurb"></p>
-      <div class="werewolf-team-list hidden" id="werewolf-team-list"></div>
-    </div>
-  </div>
-
-  <!-- Hunt rules (settings) -->
-  <div class="modal-overlay hidden" id="settings-modal">
-    <div class="modal-box">
-      <button class="modal-close" id="settings-modal-close" type="button" aria-label="Close">&times;</button>
-      <span class="card-label">Hunt rules <span class="host-only-badge">Host only</span></span>
-      <div class="toggle-row">
-        <span class="role-mini">🐺 Werewolves</span>
-        <div class="stepper">
-          <button id="wolf-minus" type="button" aria-label="Decrease Werewolf count">&minus;</button>
-          <span class="value" id="wolf-count-value">1</span>
-          <button id="wolf-plus" type="button" aria-label="Increase Werewolf count">+</button>
+        <!-- Wolf count stepper -->
+        <div class="toggle-row">
+          <div class="role-mini-wrap">
+            <img src="img/roles/werewolf.png" class="role-list-icon" alt="" />
+            <span class="role-mini">Werewolves</span>
+          </div>
+          <div class="stepper">
+            <button id="wolf-minus" type="button" aria-label="Fewer werewolves">
+              &minus;
+            </button>
+            <span class="value" id="wolf-count-value">1</span>
+            <button id="wolf-plus" type="button" aria-label="More werewolves">
+              +
+            </button>
+          </div>
         </div>
-      </div>
-      <div id="optional-roles-rows"></div>
-      <div class="field" style="margin-top:14px;">
-        <label for="night-seconds-input">Night phase length (seconds)</label>
-        <input type="text" inputmode="numeric" id="night-seconds-input" value="60">
-      </div>
-      <div class="field">
-        <label for="day-seconds-input">Day phase length (seconds)</label>
-        <input type="text" inputmode="numeric" id="day-seconds-input" value="120">
+
+        <!-- Optional roles (grouped by team, injected by buildHuntRulesPanel) -->
+        <div id="hunt-rules-roles"></div>
+
+        <!-- Timer lengths -->
+        <div class="field" style="margin-top: 14px">
+          <label for="night-seconds-input">Night phase length (seconds)</label>
+          <input
+            type="text"
+            inputmode="numeric"
+            id="night-seconds-input"
+            value="60"
+          />
+        </div>
+        <div class="field">
+          <label for="day-seconds-input">Day phase length (seconds)</label>
+          <input
+            type="text"
+            inputmode="numeric"
+            id="day-seconds-input"
+            value="120"
+          />
+        </div>
+
+        <!-- Validation warning -->
+        <p class="hunt-rules-error hidden" id="hunt-rules-error"></p>
       </div>
     </div>
-  </div>
 
-  <!-- Event log -->
-  <div class="modal-overlay hidden" id="log-modal">
-    <div class="modal-box">
-      <button class="modal-close" id="log-modal-close" type="button" aria-label="Close">&times;</button>
-      <span class="card-label">The town crier</span>
-      <div class="log-feed" id="log-feed"></div>
+    <!-- ── Event log -->
+    <div class="modal-overlay hidden" id="log-modal">
+      <div class="modal-box">
+        <button
+          class="modal-close"
+          id="log-modal-close"
+          type="button"
+          aria-label="Close"
+        >
+          &times;
+        </button>
+        <span class="card-label">The town crier</span>
+        <div class="log-feed" id="log-feed"></div>
+      </div>
     </div>
-  </div>
 
-  <!-- Full roster -->
-  <div class="modal-overlay hidden" id="roster-modal">
-    <div class="modal-box">
-      <button class="modal-close" id="roster-modal-close" type="button" aria-label="Close">&times;</button>
-      <span class="card-label">The accused (<span id="alive-count">0</span> remaining)</span>
-      <div class="player-list" id="game-player-list"></div>
-    </div>
-  </div>
+    <!-- ── Toast -->
+    <div class="toast" id="toast"></div>
 
-</div><!-- /.app-shell -->
-
-<div class="toast" id="toast"></div>
-<script type="module" src="js/app.js"></script>
-</body>
+    <script type="module" src="js/app.js"></script>
+  </body>
 </html>
