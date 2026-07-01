@@ -43,6 +43,53 @@ const fbApp = initializeApp(firebaseConfig);
 const auth = getAuth(fbApp);
 const db = getDatabase(fbApp);
 
+// Wraps any promise with a timeout so Firebase hangs fail loudly instead of silently.
+// databaseURL mismatches are the most common cause of silent hangs.
+function withTimeout(promise, ms = 8000, label = "operation") {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      reject(
+        new Error(
+          label +
+            " timed out after " +
+            ms / 1000 +
+            "s. " +
+            "Most likely cause: databaseURL in firebase-config.js does not match your " +
+            "Firebase Realtime Database URL. Find the correct URL in Firebase Console " +
+            "→ Realtime Database → Data tab (it looks like " +
+            "https://YOUR-PROJECT-default-rtdb.firebaseio.com or " +
+            "https://YOUR-PROJECT-default-rtdb.REGION.firebasedatabase.app).",
+        ),
+      );
+    }, ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+// Monitor database connection state — shows a persistent banner if the
+// Realtime Database is unreachable (wrong databaseURL is the #1 cause).
+onValue(ref(db, ".info/connected"), (snap) => {
+  const connected = snap.val() === true;
+  const banner = $("db-error-banner");
+  if (!banner) return;
+  if (connected) {
+    banner.classList.add("hidden");
+  } else {
+    // Only surface the banner after 4s — brief disconnects are normal on load
+    if (!onValue._dbWarnTimer) {
+      onValue._dbWarnTimer = setTimeout(() => {
+        if (!banner.classList.contains("hidden")) return;
+        banner.textContent =
+          "⚠️ Cannot reach Firebase Realtime Database. " +
+          "Check that databaseURL in firebase-config.js matches the URL shown in " +
+          "Firebase Console → Realtime Database → Data tab.";
+        banner.classList.remove("hidden");
+      }, 4000);
+    }
+  }
+});
+
 if (
   !firebaseConfig.apiKey ||
   String(firebaseConfig.apiKey).includes("REPLACE_ME")
@@ -568,41 +615,52 @@ async function createLobby() {
   const joinOrder = { [uid]: 0 };
 
   try {
-    await set(ref(db, `lobbies/${code}`), {
-      host: uid,
-      phase: "lobby",
-      round: 0,
-      winner: null,
-      settings,
-      joinOrder,
-      players: {
-        [uid]: {
-          name,
-          joinOrder: 0,
-          alive: true,
-          revealedRole: null,
-          connected: true,
-          disconnectedAt: null,
-          isSpectator: false,
-          avatar: "",
-          colour: "",
+    await withTimeout(
+      set(ref(db, `lobbies/${code}`), {
+        host: uid,
+        phase: "lobby",
+        round: 0,
+        winner: null,
+        settings,
+        joinOrder,
+        players: {
+          [uid]: {
+            name,
+            joinOrder: 0,
+            alive: true,
+            revealedRole: null,
+            connected: true,
+            disconnectedAt: null,
+            isSpectator: false,
+            avatar: "",
+            colour: "",
+          },
         },
-      },
-    });
+      }),
+      8000,
+      "Create lobby database write",
+    );
     startPresence();
     subscribeToLobby(code);
   } catch (err) {
     console.error("createLobby failed:", err);
     lobbyCode = null;
     isHost = false;
-    const msg =
-      err.code === "PERMISSION_DENIED" ||
-      (err.message || "").includes("PERMISSION_DENIED")
-        ? "Database permission denied — check your Firebase rules are published."
-        : "Failed to create lobby: " + (err.message || err.code);
+    let msg;
+    if ((err.message || "").includes("timed out")) {
+      msg = err.message;
+    } else if ((err.message || "").includes("PERMISSION_DENIED")) {
+      msg =
+        "Database permission denied — your Firebase rules may not be published yet.";
+    } else {
+      msg = "Failed to create lobby: " + (err.message || err.code || err);
+    }
     toast(msg, true);
-    $("landing-error").textContent = msg;
-    $("landing-error").classList.remove("hidden");
+    const errEl = $("landing-error");
+    if (errEl) {
+      errEl.textContent = msg;
+      errEl.classList.remove("hidden");
+    }
   }
 }
 
@@ -627,7 +685,11 @@ async function joinLobby() {
   }
 
   try {
-    const snap = await get(ref(db, `lobbies/${code}`));
+    const snap = await withTimeout(
+      get(ref(db, `lobbies/${code}`)),
+      8000,
+      "Lobby lookup database read",
+    );
     if (!snap.exists()) {
       toast("Lobby not found — check the code", true);
       return;
@@ -648,32 +710,47 @@ async function joinLobby() {
     isHost = g.host === uid;
 
     const myJoinOrder = playerCount;
-    await update(ref(db, `lobbies/${code}/players/${uid}`), {
-      name,
-      joinOrder: myJoinOrder,
-      alive: true,
-      revealedRole: null,
-      connected: true,
-      disconnectedAt: null,
-      isSpectator: false,
-      avatar: "",
-      colour: "",
-    });
-    await update(ref(db, `lobbies/${code}/joinOrder`), { [uid]: myJoinOrder });
+    await withTimeout(
+      update(ref(db, `lobbies/${code}/players/${uid}`), {
+        name,
+        joinOrder: myJoinOrder,
+        alive: true,
+        revealedRole: null,
+        connected: true,
+        disconnectedAt: null,
+        isSpectator: false,
+        avatar: "",
+        colour: "",
+      }),
+      8000,
+      "Join lobby player write",
+    );
+    await withTimeout(
+      update(ref(db, `lobbies/${code}/joinOrder`), { [uid]: myJoinOrder }),
+      8000,
+      "Join lobby joinOrder write",
+    );
 
     startPresence();
     subscribeToLobby(code);
   } catch (err) {
     console.error("joinLobby failed:", err);
     lobbyCode = null;
-    const msg =
-      err.code === "PERMISSION_DENIED" ||
-      (err.message || "").includes("PERMISSION_DENIED")
-        ? "Database permission denied — check your Firebase rules are published."
-        : "Failed to join lobby: " + (err.message || err.code);
+    let msg;
+    if ((err.message || "").includes("timed out")) {
+      msg = err.message;
+    } else if ((err.message || "").includes("PERMISSION_DENIED")) {
+      msg =
+        "Database permission denied — your Firebase rules may not be published yet.";
+    } else {
+      msg = "Failed to join lobby: " + (err.message || err.code || err);
+    }
     toast(msg, true);
-    $("landing-error").textContent = msg;
-    $("landing-error").classList.remove("hidden");
+    const errEl = $("landing-error");
+    if (errEl) {
+      errEl.textContent = msg;
+      errEl.classList.remove("hidden");
+    }
   }
 }
 
