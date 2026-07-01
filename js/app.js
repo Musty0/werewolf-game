@@ -69,21 +69,25 @@ function withTimeout(promise, ms = 8000, label = "operation") {
 
 // Monitor database connection state — shows a persistent banner if the
 // Realtime Database is unreachable (wrong databaseURL is the #1 cause).
+// NOTE: uses document.getElementById directly (not $) because this fires
+// before the $ helper const is initialised further down the module.
+let _dbWarnTimer = null;
 onValue(ref(db, ".info/connected"), (snap) => {
   const connected = snap.val() === true;
-  const banner = $("db-error-banner");
+  const banner = document.getElementById("db-error-banner");
   if (!banner) return;
   if (connected) {
+    clearTimeout(_dbWarnTimer);
+    _dbWarnTimer = null;
     banner.classList.add("hidden");
   } else {
-    // Only surface the banner after 4s — brief disconnects are normal on load
-    if (!onValue._dbWarnTimer) {
-      onValue._dbWarnTimer = setTimeout(() => {
-        if (!banner.classList.contains("hidden")) return;
+    if (!_dbWarnTimer) {
+      _dbWarnTimer = setTimeout(() => {
         banner.textContent =
           "⚠️ Cannot reach Firebase Realtime Database. " +
-          "Check that databaseURL in firebase-config.js matches the URL shown in " +
-          "Firebase Console → Realtime Database → Data tab.";
+          "Check that databaseURL in firebase-config.js exactly matches the URL " +
+          "shown in Firebase Console → Realtime Database → Data tab " +
+          "(yours should end in .europe-west1.firebasedatabase.app).";
         banner.classList.remove("hidden");
       }, 4000);
     }
