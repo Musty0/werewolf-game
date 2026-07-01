@@ -18,7 +18,6 @@ import {
   push,
   onValue,
   remove,
-  serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { firebaseConfig } from "./firebase-config.js";
 import {
@@ -2383,11 +2382,43 @@ async function addLog(phase, text) {
   });
 }
 
-// ── BOOT ─────────────────────────────────────────────────────────────
+// ── BOOT ───────────────────────────────────────────────────────────────────
+function setAuthStatus(ready, errMsg) {
+  const overlay = $("auth-overlay");
+  if (overlay) overlay.classList.toggle("hidden", ready);
+  [$("create-lobby-btn"), $("join-lobby-btn")].forEach((btn) => {
+    if (btn) btn.disabled = !ready;
+  });
+  if (errMsg) {
+    const errEl = $("landing-error");
+    if (errEl) {
+      errEl.textContent = errMsg;
+      errEl.classList.remove("hidden");
+    }
+  }
+}
+
+// Disable buttons while auth initialises
+setAuthStatus(false);
+
+// Safety net: if auth takes longer than 6 seconds, re-enable buttons
+const authTimeout = setTimeout(() => {
+  if (!uid) {
+    console.warn(
+      "Auth timed out after 6s — check firebase-config.js for REPLACE_ME placeholders",
+    );
+    setAuthStatus(
+      true,
+      "Connection timed out. Your firebase-config.js likely still has REPLACE_ME placeholder values — replace them with your real Firebase project config.",
+    );
+  }
+}, 6000);
+
 onAuthStateChanged(auth, (user) => {
   if (user) {
     uid = user.uid;
-    // If there's a lobby code in the URL and we just authed, try joining
+    clearTimeout(authTimeout);
+    setAuthStatus(true);
     const urlCode = urlMatch?.[1];
     if (urlCode) {
       $("join-code-input").value = urlCode.toUpperCase();
@@ -2396,8 +2427,27 @@ onAuthStateChanged(auth, (user) => {
 });
 
 signInAnonymously(auth).catch((err) => {
-  console.error("Auth failed:", err);
-  toast("Could not connect — check your internet.", true);
+  clearTimeout(authTimeout);
+  console.error("Firebase auth error:", err.code, err.message);
+  let msg;
+  if (err.code === "auth/operation-not-allowed") {
+    msg =
+      "Anonymous sign-in is disabled — go to Firebase Console → Authentication → Sign-in method → Anonymous and enable it.";
+  } else if (
+    err.code === "auth/invalid-api-key" ||
+    err.code === "auth/invalid-credential"
+  ) {
+    msg =
+      "Invalid Firebase API key — firebase-config.js still has REPLACE_ME placeholder values. Replace them with your real project config.";
+  } else if (err.code === "auth/network-request-failed") {
+    msg = "Network error reaching Firebase — check your internet connection.";
+  } else {
+    msg =
+      "Firebase auth failed (" +
+      (err.code || err.message) +
+      "). Check firebase-config.js and open the browser Console (F12) for details.";
+  }
+  setAuthStatus(true, msg);
 });
 
 showScreen("landing");
