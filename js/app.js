@@ -37,6 +37,7 @@ import {
   checkJesterWin,
   checkWinCondition,
   winnerDisplay,
+  resolveNightPure,
 } from "./roles.js";
 
 const fbApp = initializeApp(firebaseConfig);
@@ -44,9 +45,9 @@ const auth = getAuth(fbApp);
 const db = getDatabase(fbApp);
 
 // ASSET PRELOADING
-// All role icons + player avatars are small (under 1MB total combined) -- warm
-// the browser cache immediately on load so nothing pops in slowly later,
-// even for first-time visitors with an empty cache.
+// All role icons + player avatars + background art are small (under 1MB
+// total combined) -- warm the browser cache immediately on load so nothing
+// pops in slowly later, even for first-time visitors with an empty cache.
 (function preloadAssets() {
   const roleIconPaths = Object.values(ROLE_DEFS).map(function (def) {
     return def.icon;
@@ -54,10 +55,14 @@ const db = getDatabase(fbApp);
   const avatarPaths = [];
   for (var n = 1; n <= 10; n++)
     avatarPaths.push("img/avatars/player" + n + ".png");
-  roleIconPaths.concat(avatarPaths).forEach(function (src) {
-    var img = new Image();
-    img.src = src;
-  });
+  const backgroundPaths = ["img/moon.png", "img/treeline.png"];
+  roleIconPaths
+    .concat(avatarPaths)
+    .concat(backgroundPaths)
+    .forEach(function (src) {
+      var img = new Image();
+      img.src = src;
+    });
 })();
 
 // Wraps any promise with a timeout so Firebase hangs fail loudly instead of silently.
@@ -289,6 +294,7 @@ $("hud-role-btn").addEventListener("click", () => {
 // ── SETTINGS PANEL ────────────────────────────────────────────────────
 $("hud-settings-btn").addEventListener("click", () => {
   settingsShowMain();
+  buildSettingsPanel(cachedGame); // populate immediately — don't wait for the next DB update
   openModal("settings-modal");
 });
 $("settings-modal-close").addEventListener("click", () =>
@@ -1529,315 +1535,39 @@ async function resolveNight() {
   resolvingInProgress = true;
 
   try {
+    const allRoles = game.secrets || game.spectatorRoles || {};
+
+    // All the actual game-rule logic lives in roles.js's resolveNightPure(),
+    // which is unit-tested in isolation (see testing/). This function only
+    // handles turning that result into Firebase writes.
+    const result = resolveNightPure({
+      players: game.players,
+      roles: allRoles,
+      nightActions: game.nightActions,
+      wolfVotes: game.wolfVotes,
+      round: game.round,
+      poison: game.poison,
+      pirate: game.pirate,
+      silence: game.silence,
+    });
+
     const {
-      players,
-      secrets,
-      spectatorRoles,
-      nightActions,
-      wolfVotes,
-      settings,
-      round,
-      poison,
-      pirate,
-      silence,
-      abilityUsed,
-      wolfPack,
-    } = game;
-    const allRoles = secrets || spectatorRoles || {};
+      deaths,
+      amnesiasResult,
+      trackerResult,
+      trackerUid,
+      seerResult,
+      seerUid,
+      coinTossResult,
+      newPoison,
+      newSilence,
+      newPirate,
+      logMessages,
+      winResult,
+    } = result;
 
-    // Helper: get role of a uid
-    const roleOf = (pid) => allRoles[pid] || "villager";
-
-    // Active silence for THIS round (cast last round, now in effect)
-    const silencedThisRound =
-      silence?.activeRound === round ? silence.targetUid : null;
-
-    // Get an action for a uid (null if silenced, dead, or not submitted)
-    // Note: Werewolf kill is NEVER silenced (3.2 + 3.3)
-    const getAction = (pid, exemptFromSilence = false) => {
-      if (!players?.[pid]?.alive) return null;
-      if (!exemptFromSilence && pid === silencedThisRound) return null;
-      return nightActions?.[pid] || null;
-    };
-
-    const alivePids = Object.keys(players || {}).filter(
-      (pid) => players[pid]?.alive,
-    );
-    const aliveWolfUids = alivePids.filter(
-      (pid) => ROLE_DEFS[roleOf(pid)]?.team === "werewolf",
-    );
-    const nonWolfWerewolfUids = alivePids.filter(
-      (pid) => ROLE_DEFS[roleOf(pid)]?.team !== "werewolf",
-    );
-
-    const findAliveRole = (roleKey) =>
-      alivePids.find((pid) => roleOf(pid) === roleKey) || null;
-
-    const veteranUid = findAliveRole("veteran");
-    const doctorUid = findAliveRole("doctor");
-    const sheriffUid = findAliveRole("sheriff");
-    const trackerUid = findAliveRole("tracker");
-    const seerUid = findAliveRole("seer");
-    const amnesiasUid = findAliveRole("amnesiac");
-    const poisonerUid = findAliveRole("poisoner");
-    const pirateHolderUid = findAliveRole("pirate");
-    const mageUid = findAliveRole("mageWerewolf");
-
-    // ── Step 1: Silence already applied via silencedThisRound above.
-    // ── Step 2: Doctor protection
-    const doctorAction = doctorUid ? getAction(doctorUid) : null;
-    const doctorTarget =
-      doctorAction?.type === "protect" ? doctorAction.target : null;
-    const protectedSet = new Set(doctorTarget ? [doctorTarget] : []);
-
-    // ── Step 3: Veteran alert
-    const veteranAction = veteranUid ? getAction(veteranUid) : null;
-    const veteranOnAlert = veteranAction?.type === "alert";
-
-    // ── Determine wolf kill target (majority among living wolves)
-    let wolfKillTarget = null;
-    if (wolfVotes && aliveWolfUids.length) {
-      const tally = {};
-      aliveWolfUids.forEach((wuid) => {
-        const vote = wolfVotes[wuid];
-        if (vote && vote !== "abstain") tally[vote] = (tally[vote] || 0) + 1;
-      });
-      const maxVotes = Math.max(0, ...Object.values(tally));
-      const leaders = Object.entries(tally)
-        .filter(([, c]) => c === maxVotes)
-        .map(([pid]) => pid);
-      if (leaders.length === 1) wolfKillTarget = leaders[0];
-      // Tied wolf vote = no kill
-    }
-
-    const deaths = {}; // uid → cause
-
-    // Veteran alert deaths
-    if (veteranOnAlert) {
-      // Everyone who "visits" the Veteran dies (unless Doctor-protected or exempt)
-      const allActions = nightActions || {};
-      Object.entries(allActions).forEach(([actor, action]) => {
-        if (!players[actor]?.alive) return;
-        if (actor === veteranUid) return; // Veteran doesn't visit themselves
-        if (!action) return;
-
-        // What counts as visiting the Veteran:
-        const visitsVeteran =
-          action.target === veteranUid ||
-          (action.picks && action.picks.includes(veteranUid));
-        if (!visitsVeteran) return;
-
-        // Exemptions:
-        // 1. Doctor protecting the Veteran → Doctor does NOT die (Q&A #1)
-        if (
-          actor === doctorUid &&
-          action.type === "protect" &&
-          action.target === veteranUid
-        )
-          return;
-        // 2. Seer inspecting (even if Veteran is in their 4 picks) → does NOT die (Q&A #53)
-        if (actor === seerUid && action.type === "inspect4") return;
-        // 3. Amnesiac adopting dead Veteran → moot (only 1 Veteran exists, Q&A #3)
-
-        // Is the actor Doctor-protected?
-        if (protectedSet.has(actor)) return;
-        deaths[actor] = deaths[actor] || "veteran-alert";
-      });
-
-      // Wolves targeting Veteran on alert: they die, kill is cancelled
-      if (wolfKillTarget === veteranUid) {
-        aliveWolfUids.forEach((wuid) => {
-          if (!protectedSet.has(wuid)) {
-            deaths[wuid] = deaths[wuid] || "veteran-alert";
-          }
-        });
-        wolfKillTarget = null; // Kill cancelled
-      }
-    }
-
-    // ── Step 4: Werewolf kill
-    if (wolfKillTarget && players[wolfKillTarget]?.alive) {
-      if (!protectedSet.has(wolfKillTarget)) {
-        deaths[wolfKillTarget] = deaths[wolfKillTarget] || "wolves";
-      }
-    }
-
-    // ── Step 5: Sheriff shot
-    const sheriffAction = sheriffUid ? getAction(sheriffUid) : null;
-    if (sheriffAction?.type === "shoot" && sheriffAction.target) {
-      const target = sheriffAction.target;
-      if (players[target]?.alive && !deaths[target]) {
-        // Only resolve on a living target that hasn't already died this same night
-        const targetRole = roleOf(target);
-        if (ROLE_DEFS[targetRole]?.team === "werewolf") {
-          deaths[target] = "sheriff"; // Hit
-        } else {
-          deaths[sheriffUid] = "sheriff-backfire"; // Miss — Doctor cannot save
-        }
-      }
-    }
-
-    // ── Step 6: Pirate duel (only on the correct duel night)
-    let coinTossResult = null;
-    if (
-      pirate &&
-      pirate.duelRound === round &&
-      pirateHolderUid &&
-      players[pirateHolderUid]?.alive
-    ) {
-      const duelTarget = pirate.targetUid;
-      // Duel is cancelled if Pirate or target already dead this night
-      if (
-        players[duelTarget]?.alive &&
-        !deaths[pirateHolderUid] &&
-        !deaths[duelTarget]
-      ) {
-        const pirateWins = Math.random() < 0.5;
-        const loser = pirateWins ? duelTarget : pirateHolderUid;
-        if (!protectedSet.has(loser)) {
-          deaths[loser] = "pirate-duel";
-        }
-        coinTossResult = {
-          pirateUid: pirateHolderUid,
-          targetUid: duelTarget,
-          loserUid: loser,
-          pirateWins,
-        };
-      }
-    }
-
-    // ── Step 7: Poison from previous night takes effect
-    if (poison && poison.killRound === round) {
-      const ptarget = poison.targetUid;
-      if (players[ptarget]?.alive && !protectedSet.has(ptarget)) {
-        deaths[ptarget] = deaths[ptarget] || "poison";
-      }
-    }
-
-    // ── Step 8: New poison applied (for next round)
-    let newPoison = null;
-    const poisonerAction = poisonerUid ? getAction(poisonerUid) : null;
-    if (poisonerAction?.type === "poison" && poisonerAction.target) {
-      if (players[poisonerAction.target]?.alive) {
-        newPoison = {
-          targetUid: poisonerAction.target,
-          poisonedRound: round,
-          killRound: round + 1,
-          revealed: false,
-        };
-      }
-    }
-
-    // ── Step 9: Amnesiac adoption (only if Amnesiac is still alive after deaths)
-    let amnesiasResult = null;
-    const amnesiasAction = amnesiasUid ? getAction(amnesiasUid) : null;
-    if (
-      amnesiasAction?.type === "adopt" &&
-      amnesiasUid &&
-      !deaths[amnesiasUid]
-    ) {
-      const adoptTargetUid = amnesiasAction.target;
-      const adoptedRole = roleOf(adoptTargetUid);
-      const noAdopt = ["poisoner", "jester", "pirate", "amnesiac"];
-      if (!noAdopt.includes(adoptedRole)) {
-        amnesiasResult = { amnesiacUid: amnesiasUid, adoptedRole };
-      }
-    }
-
-    // ── Step 10: Tracker result
-    let trackerResult = null;
-    const trackerAction = trackerUid ? getAction(trackerUid) : null;
-    if (trackerAction?.type === "track" && trackerAction.target) {
-      const tracked = trackerAction.target;
-      const trackedAction = nightActions?.[tracked];
-      const silenced = tracked === silencedThisRound;
-      trackerResult = {
-        trackedUid: tracked,
-        didAct: !!(trackedAction && !silenced && trackedAction.type !== "none"),
-      };
-    }
-
-    // ── Step 11: Seer result (binary)
-    let seerResult = null;
-    const seerAction = seerUid ? getAction(seerUid) : null;
-    if (seerAction?.type === "inspect4" && seerAction.picks?.length === 4) {
-      const picks = seerAction.picks;
-      const evilCount = picks.filter(
-        (pid) => ROLE_DEFS[roleOf(pid)]?.team === "werewolf",
-      ).length;
-      seerResult = { picks, evilCount, isEvil: evilCount > 0 };
-    }
-
-    // ── Mage silence (for next round)
-    let newSilence = null;
-    const mageAction = mageUid ? getAction(mageUid) : null;
-    if (mageAction?.type === "silence" && mageAction.target) {
-      newSilence = { targetUid: mageAction.target, activeRound: round + 1 };
-    }
-
-    // ── New Pirate declaration (first night they use it)
-    let newPirate = null;
-    if (!pirate && pirateHolderUid) {
-      const pirateAction = pirateHolderUid ? getAction(pirateHolderUid) : null;
-      if (pirateAction?.type === "duel" && pirateAction.target) {
-        newPirate = {
-          pirateUid: pirateHolderUid,
-          targetUid: pirateAction.target,
-          declaredRound: round,
-          duelRound: round + 1,
-          announced: false,
-        };
-      }
-    }
-
-    // ── Apply deaths to players
+    const round = game.round;
     const deadUids = Object.keys(deaths);
-
-    // Build updated player-alive states for win condition check
-    const updatedPlayers = {};
-    Object.entries(players).forEach(([pid, p]) => {
-      updatedPlayers[pid] = {
-        alive: deadUids.includes(pid) ? false : p.alive,
-        role:
-          amnesiasResult && pid === amnesiasResult.amnesiacUid
-            ? amnesiasResult.adoptedRole
-            : roleOf(pid),
-      };
-    });
-
-    // Win condition check (BEFORE writing — to know next phase)
-    const winResult = checkWinCondition(updatedPlayers);
-
-    // Build log entries
-    const morningDeaths = { ...deaths };
-    const logMessages = [];
-    deadUids.forEach((pid) => {
-      const name = players[pid]?.name || "Someone";
-      switch (deaths[pid]) {
-        case "wolves":
-          logMessages.push(`${name} was hunted by the Werewolves.`);
-          break;
-        case "veteran-alert":
-          logMessages.push(`${name} was slain by the Veteran on Alert.`);
-          break;
-        case "sheriff":
-          logMessages.push(`${name} was shot by the Sheriff.`);
-          break;
-        case "sheriff-backfire":
-          logMessages.push(
-            `The Sheriff's shot misfired. The Sheriff has perished.`,
-          );
-          break;
-        case "pirate-duel":
-          logMessages.push(`${name} fell in a duel.`);
-          break;
-        case "poison":
-          logMessages.push(`${name} has succumbed to poison.`);
-          break;
-      }
-    });
-    if (!deadUids.length)
-      logMessages.push("A quiet night. The town wakes unharmed.");
 
     // ── Build Firebase multi-path update
     const updates = {};
@@ -1855,21 +1585,19 @@ async function resolveNight() {
       updates[`spectatorRoles/${amnesiasResult.amnesiacUid}`] =
         amnesiasResult.adoptedRole;
       updates[`abilityUsed/${amnesiasResult.amnesiacUid}`] = true;
-      // If adopted wolf role, add to wolfPack
       if (ROLE_DEFS[amnesiasResult.adoptedRole]?.team === "werewolf") {
         updates[`wolfPack/${amnesiasResult.amnesiacUid}`] = true;
       }
     }
 
     // Private results for Tracker and Seer
-    if (trackerResult)
+    if (trackerResult && trackerUid)
       updates[`nightResults/${trackerUid}`] = {
         type: "track",
         ...trackerResult,
       };
-    if (seerResult) {
+    if (seerResult && seerUid) {
       updates[`nightResults/${seerUid}`] = { type: "seer", ...seerResult };
-      // Append to shared seer investigation history
       const existingHistory = Array.isArray(cachedGame.seerInvestigations)
         ? cachedGame.seerInvestigations
         : [];
@@ -1886,7 +1614,7 @@ async function resolveNight() {
 
     // Morning report data (read by all clients during morning phase)
     updates.morning = {
-      deaths: morningDeaths,
+      deaths,
       coinToss: coinTossResult,
       poisonAnnounce: newPoison ? { targetUid: newPoison.targetUid } : null,
       pirateAnnounce: newPirate ? { targetUid: newPirate.targetUid } : null,
@@ -1904,15 +1632,15 @@ async function resolveNight() {
 
     // Poison state
     if (newPoison) updates.poison = newPoison;
-    else if (poison?.killRound === round) updates.poison = null;
+    else if (game.poison?.killRound === round) updates.poison = null;
 
     // Silence
     if (newSilence) updates.silence = newSilence;
-    else if (silence?.activeRound === round) updates.silence = null;
+    else if (game.silence?.activeRound === round) updates.silence = null;
 
     // Pirate state
     if (newPirate) updates.pirate = newPirate;
-    else if (pirate?.duelRound === round) updates.pirate = null; // duel resolved, clear
+    else if (game.pirate?.duelRound === round) updates.pirate = null;
 
     // Phase transition
     if (winResult) {
