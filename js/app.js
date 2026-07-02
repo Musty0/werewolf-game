@@ -1284,6 +1284,7 @@ function renderNight(game) {
 
   // Host resolve button
   $("resolve-btn").classList.toggle("hidden", !isHost);
+  $("resolve-btn").textContent = "Skip";
 }
 
 function renderNightActionCard(game, role, def, silenced, abilityUsed) {
@@ -1525,6 +1526,7 @@ $("resolve-btn").addEventListener("click", () => {
   const phase = cachedGame?.phase;
   if (phase === "night") resolveNight();
   else if (phase === "day" || phase === "revote") resolveDay();
+  else if (phase === "morning") advanceToDay();
 });
 
 // ── NIGHT RESOLUTION (HOST ONLY) ─────────────────────────────────────
@@ -1780,8 +1782,10 @@ function renderMorning(game) {
       update(ref(db, `lobbies/${lobbyCode}/nightResults/${uid}`), null);
   }
 
-  // Host advance button
-  $("morning-advance-btn").classList.toggle("hidden", !isHost);
+  // Host advance — uses the single unified resolve-btn (see the resolve-btn
+  // click handler dispatch, which routes to advanceToDay() during morning)
+  $("resolve-btn").classList.toggle("hidden", !isHost);
+  $("resolve-btn").textContent = "Skip";
 }
 
 // Role reveal buttons
@@ -1804,8 +1808,6 @@ async function submitRevealChoice(reveal) {
   await update(ref(db, `lobbies/${lobbyCode}`), updates);
   $("reveal-choice-card").classList.add("hidden");
 }
-
-$("morning-advance-btn").addEventListener("click", () => advanceToDay());
 
 async function advanceToDay() {
   if (!isHost || !lobbyCode || !cachedGame) return;
@@ -1976,6 +1978,7 @@ function renderDay(game) {
 
   // Host resolve
   $("resolve-btn").classList.toggle("hidden", !isHost);
+  $("resolve-btn").textContent = "Skip";
 }
 
 async function submitVote(targetId) {
