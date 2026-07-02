@@ -1089,3 +1089,27 @@ button:disabled {
   border: 1px solid var(--moss); border-radius: 2px;
   padding: 1px 6px; margin-left: auto;
 }
+
+/* ── Bots (Hunt Rules panel) ──────────────────────────────────── */
+.hunt-rules-bots-section {
+  margin-bottom: 14px; padding-bottom: 14px;
+  border-bottom: 1px dashed rgba(0,0,0,0.18);
+}
+.hunt-rules-bot-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.hunt-rules-bot-row {
+  display: flex; align-items: center; justify-content: space-between;
+  background: rgba(0,0,0,0.04);
+  border: 1px solid rgba(0,0,0,0.1);
+  border-radius: 3px;
+  padding: 6px 10px;
+}
+.hunt-rules-bot-name {
+  font-family: var(--font-body); font-size: 0.9rem; color: var(--ink);
+}
+
+.bot-badge {
+  font-family: var(--font-hand); font-size: 0.76rem;
+  color: var(--twilight); background: rgba(74,58,92,0.1);
+  border: 1px solid var(--twilight); border-radius: 2px;
+  padding: 1px 6px; margin-left: 6px;
+}

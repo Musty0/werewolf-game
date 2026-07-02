@@ -134,6 +134,33 @@ let seerPicksLocal = []; // client-side staging for Seer's 4 picks
 let resolvingInProgress = false; // guard against double-resolve
 let pendingNightActionType = null; // what night action type this player submitted
 
+// ── BOT AI STATE (host-side only) ─────────────────────────────────────
+// Bots are simulated players managed entirely by the host's browser.
+// They never authenticate — the host writes their actions on their behalf,
+// which is already permitted since the host has full write access to the
+// whole lobby subtree. See runBotController() further down.
+const BOT_NAMES = [
+  "Bot Abigail",
+  "Bot Elias",
+  "Bot Mercy",
+  "Bot Increase",
+  "Bot Constance",
+  "Bot Ezekiel",
+  "Bot Patience",
+  "Bot Jeremiah",
+  "Bot Prudence",
+  "Bot Nathaniel",
+];
+let botPlannedRound = {}; // uid -> round they'll use their once-per-game ability
+let botScheduled = {}; // `${round}-${phase}-${uid}` -> true (already scheduled/acted)
+let botWolfTarget = {}; // round -> shared target uid the wolf-bot pack leans toward
+
+function resetBotState() {
+  botPlannedRound = {};
+  botScheduled = {};
+  botWolfTarget = {};
+}
+
 // ── DOM HELPERS ──────────────────────────────────────────────────────
 const $ = (id) => document.getElementById(id);
 const show = (el) =>
@@ -318,8 +345,9 @@ function buildSettingsPanel(game) {
         p.connected === false
           ? '<span class="conn-badge conn-badge--offline" title="Disconnected">⚡</span>'
           : "";
+      const botBadge = p.isBot ? '<span class="bot-badge">🤖 Bot</span>' : "";
       const transferBtn =
-        isHost && puid !== uid
+        isHost && puid !== uid && !p.isBot
           ? `<button class="btn-ghost btn-xs transfer-host-btn" data-uid="${escHTML(puid)}" title="Make host">👑 Make host</button>`
           : puid === uid
             ? '<span class="you-badge">You</span>'
@@ -328,7 +356,7 @@ function buildSettingsPanel(game) {
         <img src="${escHTML(p.avatar || "img/avatars/player1.png")}" class="settings-avatar"
              style="border-color:${escHTML(p.colour || "#888")}">
         <span class="settings-pname">${escHTML(p.name)}${!p.alive && phase !== "lobby" ? ' <span class="dead-label">(dead)</span>' : ""}</span>
-        ${connBadge}${transferBtn}
+        ${botBadge}${connBadge}${transferBtn}
       `;
       listEl.appendChild(row);
     });
@@ -377,7 +405,7 @@ function buildSettingsPanel(game) {
     heading.textContent = "Transfer host";
     transferEl.appendChild(heading);
     Object.entries(players)
-      .filter(([puid]) => puid !== uid)
+      .filter(([puid, p]) => puid !== uid && !p.isBot)
       .sort((a, b) => (a[1].joinOrder || 0) - (b[1].joinOrder || 0))
       .forEach(([puid, p]) => {
         const btn = document.createElement("button");
@@ -439,6 +467,8 @@ function buildHuntRulesPanel() {
   if (!cachedGame) return;
   const settings = cachedGame.settings || defaultSettings();
   const playerCount = Object.keys(cachedGame.players || {}).length;
+
+  renderBotList();
 
   // Werewolf stepper
   $("wolf-count-value").textContent = settings.werewolfCount || 1;
@@ -524,6 +554,98 @@ $("hunt-rules-roles").addEventListener("change", async (e) => {
   await update(ref(db, `lobbies/${lobbyCode}/settings`), {
     optionalRoles: constrained.optionalRoles,
   });
+});
+
+// ── BOTS (HOST-ONLY, LOBBY ONLY) ──────────────────────────────────────
+// Bots are added/removed for testing directly from the Hunt Rules panel.
+// They never authenticate with Firebase — the host writes their name/state
+// on join, then drives all their in-game decisions from runBotController().
+function renderBotList() {
+  if (!cachedGame) return;
+  const listEl = $("hunt-rules-bot-list");
+  if (!listEl) return;
+  const players = cachedGame.players || {};
+  const bots = Object.entries(players).filter(([, p]) => p.isBot);
+
+  listEl.innerHTML = "";
+  if (!bots.length) {
+    listEl.innerHTML = '<p class="muted-note">No bots added yet.</p>';
+  } else {
+    bots
+      .sort((a, b) => (a[1].joinOrder || 0) - (b[1].joinOrder || 0))
+      .forEach(([botUid, p]) => {
+        const row = document.createElement("div");
+        row.className = "hunt-rules-bot-row";
+        row.innerHTML = `
+          <span class="hunt-rules-bot-name">${escHTML(p.name)}</span>
+          <button class="btn-ghost btn-xs" data-remove-bot="${escHTML(botUid)}" type="button">Remove</button>
+        `;
+        listEl.appendChild(row);
+      });
+  }
+
+  const playerCount = Object.keys(players).length;
+  const addBtn = $("add-bot-btn");
+  if (addBtn) addBtn.disabled = playerCount >= 10;
+}
+
+async function addBot() {
+  if (!isHost || !lobbyCode || !cachedGame) return;
+  const players = cachedGame.players || {};
+  const count = Object.keys(players).length;
+  if (count >= 10) {
+    toast("Lobby is full (10/10)", true);
+    return;
+  }
+
+  const usedNames = new Set(Object.values(players).map((p) => p.name));
+  const available = BOT_NAMES.filter((n) => !usedNames.has(n));
+  const name = available.length
+    ? available[Math.floor(Math.random() * available.length)]
+    : "Bot " + Math.floor(Math.random() * 1000);
+
+  const botUid = "bot_" + Math.random().toString(36).slice(2, 10);
+  const joinOrderNum = count;
+
+  try {
+    await update(ref(db, `lobbies/${lobbyCode}`), {
+      [`players/${botUid}`]: {
+        name,
+        isBot: true,
+        joinOrder: joinOrderNum,
+        alive: true,
+        revealedRole: null,
+        connected: true,
+        disconnectedAt: null,
+        isSpectator: false,
+        avatar: "",
+        colour: "",
+      },
+      [`joinOrder/${botUid}`]: joinOrderNum,
+    });
+  } catch (err) {
+    console.error("addBot failed:", err);
+    toast("Failed to add bot: " + (err.message || err.code), true);
+  }
+}
+
+async function removeBot(botUid) {
+  if (!isHost || !lobbyCode) return;
+  try {
+    await update(ref(db, `lobbies/${lobbyCode}`), {
+      [`players/${botUid}`]: null,
+      [`joinOrder/${botUid}`]: null,
+    });
+  } catch (err) {
+    console.error("removeBot failed:", err);
+    toast("Failed to remove bot: " + (err.message || err.code), true);
+  }
+}
+
+$("add-bot-btn")?.addEventListener("click", addBot);
+$("hunt-rules-bot-list")?.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-remove-bot]");
+  if (btn) removeBot(btn.dataset.removeBot);
 });
 
 // Timer inputs
@@ -901,7 +1023,9 @@ function checkPresence(game) {
 async function autoTransferHost(game, oldHostUid) {
   const joinOrders = game.joinOrder || {};
   const playersSorted = Object.entries(game.players || {})
-    .filter(([puid, p]) => puid !== oldHostUid && p.connected !== false)
+    .filter(
+      ([puid, p]) => puid !== oldHostUid && p.connected !== false && !p.isBot,
+    )
     .sort((a, b) => (joinOrders[a[0]] || 0) - (joinOrders[b[0]] || 0));
   if (!playersSorted.length) return;
   const newHostUid = playersSorted[0][0];
@@ -967,6 +1091,10 @@ function subscribeToLobby(code) {
     if (g.secrets?.[uid]) myRole = g.secrets[uid];
 
     checkPresence(g);
+    if (isHost) runBotController(g);
+    if (!$("hunt-rules-modal").classList.contains("hidden")) {
+      buildHuntRulesPanel();
+    }
     renderGame(g);
   });
 }
@@ -1033,6 +1161,8 @@ async function startGame() {
     toast(error, true);
     return;
   }
+
+  resetBotState();
 
   const { roleByUid, werewolfUids } = assignRoles(playerIds, settings);
   const avatarData = assignAvatarsAndColours(playerIds);
@@ -2442,6 +2572,7 @@ function renderEnd(game) {
 
 $("play-again-btn").addEventListener("click", async () => {
   if (!isHost || !lobbyCode) return;
+  resetBotState();
   // Reset game to lobby with same players
   const game = cachedGame;
   if (!game) return;
@@ -2482,6 +2613,286 @@ $("play-again-btn").addEventListener("click", async () => {
     players: resetPlayers,
   });
 });
+
+// ── BOT AI CONTROLLER (host-side only) ────────────────────────────────
+// Called on every lobby update while isHost is true. Schedules randomized-
+// delay actions for each living bot so games can be tested without needing
+// a full group of human players. Bots play at a "decent but imperfect"
+// level: they use their abilities, vote, and coordinate loosely as a wolf
+// pack, but have no deep suspicion-tracking or memory beyond what's cheap
+// to compute here.
+
+function randDelay(minMs, maxMs) {
+  return minMs + Math.random() * (maxMs - minMs);
+}
+
+// Once-per-game roles get a randomly pre-planned round (1-3) at which the
+// bot will use their ability, so bots don't all fire on round 1 and don't
+// all wait until it's too late either.
+function plannedRoundFor(botUid) {
+  if (!botPlannedRound[botUid]) {
+    botPlannedRound[botUid] = 1 + Math.floor(Math.random() * 3);
+  }
+  return botPlannedRound[botUid];
+}
+
+function runBotController(game) {
+  if (!isHost || !lobbyCode || !game) return;
+  const phase = game.phase;
+  const round = game.round || 1;
+  const players = game.players || {};
+  const roles = game.spectatorRoles || game.secrets || {};
+
+  const bots = Object.entries(players).filter(([, p]) => p.isBot && p.alive);
+  if (!bots.length) return;
+
+  if (phase === "night") {
+    const silencedThisRound =
+      game.silence?.activeRound === round ? game.silence.targetUid : null;
+
+    bots.forEach(([botUid]) => {
+      const key = `${round}-night-${botUid}`;
+      if (botScheduled[key]) return;
+      if (botUid === silencedThisRound) {
+        botScheduled[key] = true;
+        return;
+      }
+
+      const role = roles[botUid] || "villager";
+      const def = ROLE_DEFS[role];
+      const isWolf = def?.team === "werewolf";
+
+      botScheduled[key] = true;
+
+      if (isWolf) {
+        if (!game.wolfVotes?.[botUid]) scheduleBotWolfVote(botUid, round);
+        // Mage Werewolf additionally has its own silence ability
+        if (role === "mageWerewolf" && !game.nightActions?.[botUid]) {
+          scheduleBotSingleAction(botUid, role, round);
+        }
+        return;
+      }
+
+      if (!def?.night) return; // villager / mayor / jester — nothing to do at night
+      if (game.nightActions?.[botUid]) return;
+      scheduleBotSingleAction(botUid, role, round);
+    });
+  }
+
+  if (phase === "day" || phase === "revote") {
+    bots.forEach(([botUid]) => {
+      const key = `${round}-${phase}-${botUid}`;
+      if (botScheduled[key]) return;
+      if (game.dayVotes?.[botUid]) {
+        botScheduled[key] = true;
+        return;
+      }
+      botScheduled[key] = true;
+      scheduleBotVote(botUid, round, phase);
+    });
+  }
+}
+
+function scheduleBotWolfVote(botUid, round) {
+  const delay = randDelay(2500, 7500);
+  setTimeout(async () => {
+    if (
+      !cachedGame ||
+      cachedGame.phase !== "night" ||
+      cachedGame.round !== round
+    )
+      return;
+    if (!cachedGame.players?.[botUid]?.alive) return;
+    if (cachedGame.wolfVotes?.[botUid]) return;
+
+    const players = cachedGame.players || {};
+    const roles = cachedGame.spectatorRoles || cachedGame.secrets || {};
+    const aliveNonWolf = Object.keys(players).filter(
+      (pid) => players[pid].alive && ROLE_DEFS[roles[pid]]?.team !== "werewolf",
+    );
+    if (!aliveNonWolf.length) return;
+
+    // Loose pack coordination: lean toward whatever target another wolf
+    // bot already picked this round, with some chance of disagreement.
+    let target = botWolfTarget[round];
+    if (!target || !aliveNonWolf.includes(target) || Math.random() < 0.15) {
+      target = aliveNonWolf[Math.floor(Math.random() * aliveNonWolf.length)];
+      botWolfTarget[round] = target;
+    }
+
+    try {
+      await set(ref(db, `lobbies/${lobbyCode}/wolfVotes/${botUid}`), target);
+    } catch (err) {
+      console.error("bot wolf vote failed:", err);
+    }
+  }, delay);
+}
+
+function scheduleBotSingleAction(botUid, role, round) {
+  const def = ROLE_DEFS[role];
+  const delay = randDelay(3000, 8500);
+
+  setTimeout(async () => {
+    if (
+      !cachedGame ||
+      cachedGame.phase !== "night" ||
+      cachedGame.round !== round
+    )
+      return;
+    if (!cachedGame.players?.[botUid]?.alive) return;
+    if (cachedGame.nightActions?.[botUid]) return;
+    if (def.usesPerGame === 1 && cachedGame.abilityUsed?.[botUid]) return;
+
+    const players = cachedGame.players || {};
+    const aliveIds = Object.keys(players).filter((pid) => players[pid].alive);
+    const otherAlive = aliveIds.filter((pid) => pid !== botUid);
+    const deadIds = Object.keys(players).filter((pid) => !players[pid].alive);
+    const roles = cachedGame.spectatorRoles || cachedGame.secrets || {};
+
+    let payload = null;
+
+    switch (def.night?.type) {
+      case "protect": {
+        const pool = def.night.allowSelf ? aliveIds : otherAlive;
+        if (!pool.length) return;
+        const target =
+          def.night.allowSelf && Math.random() < 0.25
+            ? botUid
+            : pool[Math.floor(Math.random() * pool.length)];
+        payload = { type: "protect", target };
+        break;
+      }
+      case "shoot": {
+        if (round < plannedRoundFor(botUid) || !otherAlive.length) return;
+        payload = {
+          type: "shoot",
+          target: otherAlive[Math.floor(Math.random() * otherAlive.length)],
+        };
+        break;
+      }
+      case "track": {
+        if (round < plannedRoundFor(botUid) || !otherAlive.length) return;
+        payload = {
+          type: "track",
+          target: otherAlive[Math.floor(Math.random() * otherAlive.length)],
+        };
+        break;
+      }
+      case "poison": {
+        if (round < plannedRoundFor(botUid) || !otherAlive.length) return;
+        payload = {
+          type: "poison",
+          target: otherAlive[Math.floor(Math.random() * otherAlive.length)],
+        };
+        break;
+      }
+      case "duel": {
+        if (round < plannedRoundFor(botUid) || !otherAlive.length) return;
+        payload = {
+          type: "duel",
+          target: otherAlive[Math.floor(Math.random() * otherAlive.length)],
+        };
+        break;
+      }
+      case "alert": {
+        if (round < plannedRoundFor(botUid)) return;
+        payload = { type: "alert" };
+        break;
+      }
+      case "silence": {
+        if (round < plannedRoundFor(botUid) || !otherAlive.length) return;
+        payload = {
+          type: "silence",
+          target: otherAlive[Math.floor(Math.random() * otherAlive.length)],
+        };
+        break;
+      }
+      case "inspect4": {
+        if (round < plannedRoundFor(botUid)) return;
+        const pool = [...aliveIds, ...deadIds].filter((pid) => pid !== botUid);
+        if (pool.length < 4) return;
+        const shuffled = pool.slice().sort(() => Math.random() - 0.5);
+        payload = { type: "inspect4", picks: shuffled.slice(0, 4) };
+        break;
+      }
+      case "adopt": {
+        const adoptable = deadIds.filter((pid) => {
+          const r = roles[pid] || "";
+          return !["poisoner", "jester", "pirate", "amnesiac"].includes(r);
+        });
+        if (!adoptable.length) return;
+        payload = {
+          type: "adopt",
+          target: adoptable[Math.floor(Math.random() * adoptable.length)],
+        };
+        break;
+      }
+      default:
+        return;
+    }
+
+    if (!payload) return;
+    try {
+      const updates = { [`nightActions/${botUid}`]: payload };
+      if (def.usesPerGame === 1) updates[`abilityUsed/${botUid}`] = true;
+      await update(ref(db, `lobbies/${lobbyCode}`), updates);
+    } catch (err) {
+      console.error("bot night action failed:", err);
+    }
+  }, delay);
+}
+
+function scheduleBotVote(botUid, round, phase) {
+  const delay = randDelay(3000, 9000);
+  setTimeout(async () => {
+    if (!cachedGame || cachedGame.phase !== phase || cachedGame.round !== round)
+      return;
+    if (!cachedGame.players?.[botUid]?.alive) return;
+    if (cachedGame.dayVotes?.[botUid]) return;
+
+    const players = cachedGame.players || {};
+    const roles = cachedGame.spectatorRoles || cachedGame.secrets || {};
+    const myRoleKey = roles[botUid] || "villager";
+    const isWolfBot = ROLE_DEFS[myRoleKey]?.team === "werewolf";
+
+    let candidates;
+    if (phase === "revote" && cachedGame.revoteEligible?.length) {
+      candidates = cachedGame.revoteEligible.filter((id) => id !== botUid);
+    } else {
+      candidates = Object.keys(players).filter(
+        (pid) => players[pid].alive && pid !== botUid,
+      );
+      candidates.push("skip");
+    }
+    if (!candidates.length) return;
+
+    // Wolf-team bots avoid voting for their own pack when possible
+    let pool = candidates;
+    if (isWolfBot) {
+      const wolfPack = cachedGame.wolfPack || {};
+      const filtered = candidates.filter(
+        (id) => id === "skip" || !wolfPack[id],
+      );
+      if (filtered.length) pool = filtered;
+    }
+
+    let target;
+    if (pool.includes("skip") && Math.random() < 0.12) {
+      target = "skip";
+    } else {
+      const realPool = pool.filter((id) => id !== "skip");
+      target = realPool.length
+        ? realPool[Math.floor(Math.random() * realPool.length)]
+        : pool[0] || "skip";
+    }
+
+    try {
+      await set(ref(db, `lobbies/${lobbyCode}/dayVotes/${botUid}`), target);
+    } catch (err) {
+      console.error("bot day vote failed:", err);
+    }
+  }, delay);
+}
 
 // ── MAIN RENDER DISPATCH ──────────────────────────────────────────────
 function renderGame(game) {
